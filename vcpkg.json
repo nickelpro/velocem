@@ -1,0 +1,31 @@
+{
+  "name": "velocem",
+  "version": "0.0.1",
+  "description": "Python WSGI Server",
+  "homepage": "https://github.com/nickelpro/velocem",
+  "maintainers": [
+    "Vito Gamberini <vito@gamberini.email>"
+  ],
+  "license": "CC0-1.0",
+  "dependencies": [
+    "llhttp",
+    "libuv"
+  ],
+  "vcpkg-configuration": {
+    "default-registry": {
+      "kind": "git",
+      "baseline": "830f86fb309ad7167468a433a890b7415fbb90a5",
+      "repository": "https://github.com/microsoft/vcpkg.git"
+    },
+    "registries": [
+      {
+        "kind": "git",
+        "baseline": "46d52333820ada90be0e3fa9addc5d62e8abf5bd",
+        "repository": "https://github.com/nickelpro/vito-reg.git",
+        "packages": [
+          "vdap"
+        ]
+      }
+    ]
+  }
+}
