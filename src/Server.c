@@ -1,3 +1,4 @@
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -7,6 +8,11 @@
 
 #include <llhttp.h>
 #include <uv.h>
+
+// Get the actual fuck out of here with this shit MSVC
+#ifdef environ
+#undef environ
+#endif
 
 #define DEFAULT_BUF_SIZE (1 << 16)
 #define DEFAULT_HEADER_COUNT (1 << 5)
@@ -312,7 +318,7 @@ static PyObject* build_environ(Request* req) {
   return environ;
 }
 
-static int on_query_next(llhttp_t* parser, const char*, size_t length) {
+static int on_query_next(llhttp_t* parser, const char* _, size_t length) {
   Request* req = GET_PARSER_REQUEST(parser);
   req->query.len += length;
   return 0;
@@ -351,7 +357,7 @@ static int on_url(llhttp_t* parser, const char* at, size_t length) {
   return 0;
 }
 
-static int on_method_next(llhttp_t* parser, const char*, size_t length) {
+static int on_method_next(llhttp_t* parser, const char* _, size_t length) {
   Request* req = GET_PARSER_REQUEST(parser);
   req->method.len += length;
   return 0;
@@ -365,10 +371,10 @@ static int on_method(llhttp_t* parser, const char* at, size_t length) {
   return 0;
 }
 
-static int on_header_field_next(llhttp_t* parser, const char*, size_t length) {
+static int on_header_field_next(llhttp_t* parser, const char* _, size_t len) {
   Request* req = GET_PARSER_REQUEST(parser);
   HTTPHeader* header = &req->headers.fvs[req->headers.used];
-  header->field.len += length;
+  header->field.len += len;
   return 0;
 }
 
@@ -389,10 +395,10 @@ static int on_header_field(llhttp_t* parser, const char* at, size_t length) {
   return 0;
 }
 
-static int on_header_value_next(llhttp_t* parser, const char*, size_t length) {
+static int on_header_value_next(llhttp_t* parser, const char* _, size_t len) {
   Request* req = GET_PARSER_REQUEST(parser);
   HTTPHeader* header = &req->headers.fvs[req->headers.used];
-  header->value.len += length;
+  header->value.len += len;
   return 0;
 }
 
@@ -525,7 +531,7 @@ static void start_response_worker(uv_work_t* thread) {
   PyGILState_Release(state);
 }
 
-static void error_write_cb(uv_write_t* write, int /*status*/) {
+static void error_write_cb(uv_write_t* write, int _ /*status*/) {
   Request* req = GET_WRITE_REQUEST(write);
   uv_close((uv_handle_t*) req, on_close);
 }
@@ -710,7 +716,7 @@ Py_LOCAL_SYMBOL int run_server(PyObject* app, char* host, unsigned port,
   if(ret)
     return ret;
 
-  uv_getaddrinfo_t info = {};
+  uv_getaddrinfo_t info = {0};
   ret = uv_ip4_addr(host, port, &host_addr);
   if(ret) {
     static struct addrinfo hints = {

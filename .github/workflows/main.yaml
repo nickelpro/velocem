@@ -1,0 +1,69 @@
+name: Build and Upload (on release)
+
+on:
+  workflow_dispatch:
+  push:
+  pull_request:
+  release:
+    types:
+      - published
+
+jobs:
+  build_wheels:
+    name: Build wheels on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build
+        env:
+          CIBW_SKIP: "pp*"
+          CIBW_BUILD: "*win_amd64 *mac* *-manylinux_x86_64"
+          CIBW_BUILD_FRONTEND: build
+          CIBW_BEFORE_ALL_LINUX: dnf install -y git zip
+          CIBW_MANYLINUX_X86_64_IMAGE: manylinux_2_28
+        uses: pypa/cibuildwheel@v2.16.2
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          path: ./wheelhouse/*.whl
+
+  build_sdist:
+    name: Build sdist
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build
+        run: pipx run build --sdist
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          path: dist/*.tar.gz
+
+  upload:
+    needs: [build_wheels, build_sdist]
+    environment: pypi
+    permissions:
+      id-token: write
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release' && github.event.action == 'published'
+
+    steps:
+      - name: Download Artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: artifact
+          path: dist
+
+      - name: Upload to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
