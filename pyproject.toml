@@ -1,12 +1,12 @@
 [project]
 name = "velocem"
 version = "0.0.1"
-description = "velocem docstring"
+description = "Hyperspeed Python Web Framework"
 readme = "ReadMe.md"
 requires-python = ">=3.11"
 license = { "file" = "UsageLicense" }
 authors = [{ "name" = "Vito Gamberini", "email" = "vito@gamberini.email" }]
-keywords = ["WSGI", "ASGI"]
+keywords = ["WSGI"]
 classifiers = [
   "Development Status :: 2 - Pre-Alpha",
   "License :: OSI Approved :: zlib/libpng License",
@@ -17,7 +17,7 @@ classifiers = [
   "Operating System :: Microsoft :: Windows",
   "Operating System :: MacOS",
 ]
-urls = { "Documentation" = "https://github.com/nickelpro" }
+urls = { "Documentation" = "https://github.com/nickelpro/velocem" }
 dependencies = []
 
 [build-system]
