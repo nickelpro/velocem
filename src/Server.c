@@ -235,7 +235,7 @@ static PyObject* create_header_string(StrView field) {
   return str;
 }
 
-static PyObject* push_headers(PyObject* dict, HTTPHeader* headers, size_t len) {
+static void push_headers(PyObject* dict, HTTPHeader* headers, size_t len) {
   for(HTTPHeader* hdr = headers; hdr < headers + len; ++hdr) {
     PyObject* k = create_header_string(hdr->field);
     if(!k)
