@@ -4,8 +4,9 @@
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 
-void init();
+Py_LOCAL_SYMBOL void init();
 
-int run_server(char* host, PyObject* app, unsigned port, unsigned backlog);
+Py_LOCAL_SYMBOL int run_server(PyObject* app, char* host, unsigned port,
+    unsigned backlog);
 
 #endif

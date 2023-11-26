@@ -32,6 +32,7 @@ find_package(llhttp CONFIG REQUIRED)
 
 Python3_add_library(velocem MODULE)
 target_link_libraries(velocem PRIVATE libuv::uv_a llhttp::llhttp_static Python3::Module)
+target_compile_features(velocem PRIVATE c_std_23)
 
 add_subdirectory(src)
 

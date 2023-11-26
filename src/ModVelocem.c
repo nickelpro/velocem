@@ -1,9 +1,9 @@
+#include <stdio.h>
 #include <string.h>
 
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 
-#include "PythonInternal.h"
 #include "Velocem.h"
 
 static PyObject* run(PyObject* self, PyObject* const* args, Py_ssize_t nargs,
@@ -22,7 +22,8 @@ static PyObject* run(PyObject* self, PyObject* const* args, Py_ssize_t nargs,
 
   Py_INCREF(app);
 
-  if(run_server(host, app, port, listen_backlog))
+  PySys_WriteStdout("Running server at http://%s:%u\n", host, port);
+  if(run_server(app, host, port, listen_backlog))
     return NULL;
 
   Py_DECREF(app);

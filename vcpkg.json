@@ -1,12 +1,12 @@
 {
   "name": "velocem",
   "version": "0.0.1",
-  "description": "Python WSGI Server",
+  "description": "Hyperspeed Python Web Framework",
   "homepage": "https://github.com/nickelpro/velocem",
   "maintainers": [
     "Vito Gamberini <vito@gamberini.email>"
   ],
-  "license": "CC0-1.0",
+  "license": "Zlib",
   "dependencies": [
     "llhttp",
     "libuv"

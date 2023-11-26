@@ -1,4 +1,5 @@
 #include <stddef.h>
+#include <stdio.h>
 #include <stdlib.h>
 
 #define PY_SSIZE_T_CLEAN
@@ -9,6 +10,7 @@
 
 #define DEFAULT_BUF_SIZE (1 << 16)
 #define DEFAULT_HEADER_COUNT (1 << 5)
+#define DEFAULT_SEND_BUFFERS (DEFAULT_HEADER_COUNT * 4 + (1 << 3))
 
 static PyObject* _GLOBAL_ENVIRON;
 
@@ -36,19 +38,37 @@ static PyObject* _HTTP_1_1;
 static PyObject* _HTTP_1_0;
 static PyObject* _EMPTY_STRING;
 
+static const char _cHTTP_1_1[] = "HTTP/1.1 ";
+static const char _cHTTP_rn[] = "\r\n";
+static const char _cHTTP_rnrn[] = "\r\n\r\n";
+static const char _cHTTP_colon[] = ": ";
+static const char _cHTTP_500[] = "HTTP/1.1 500 Internal Server Error\r\n\r\n";
 
 typedef struct {
   size_t len;
   const char* base;
 } StrView;
 
-#define VIEW2PY(v) PyUnicode_FromStringAndSize(v.base, v.len)
+#define VIEW2PY(v) PyUnicode_FromStringAndSize((v).base, (v).len)
 #define PyDict_SetView(dict, key, view)                                        \
   do {                                                                         \
     PyObject* v = VIEW2PY(view);                                               \
     PyDict_SetItem(dict, key, v);                                              \
     Py_DECREF(v);                                                              \
   } while(0)
+
+#define BUFFER_STR_SIZE(buf, str, size)                                        \
+  do {                                                                         \
+    uv_buf_t* b = (buf);                                                       \
+    b->base = (char*) (str);                                                   \
+    b->len = (size);                                                           \
+  } while(0)
+#define STRSZ(str) (sizeof(str) - 1)
+#define BUFFER_STR(buf, str) BUFFER_STR_SIZE(buf, str, STRSZ(str))
+#define BUFFER_PYSTR(buf, pyobj)                                               \
+  BUFFER_STR_SIZE(buf, PyUnicode_DATA(pyobj), PyUnicode_GET_LENGTH(pyobj))
+#define BUFFER_PYBYTES(buf, pyobj)                                             \
+  BUFFER_STR_SIZE(buf, PyBytes_AsString(pyobj), PyBytes_GET_SIZE(pyobj))
 
 typedef struct {
   StrView field;
@@ -63,6 +83,16 @@ typedef struct {
 
 typedef struct {
   uv_tcp_t client;
+
+  uv_write_t write;
+  enum {
+    WRITE_LIST,
+    WRITE_ITER,
+  } write_status;
+
+  uv_work_t thread;
+  bool borked;
+
   PyObject* app;
   PyObject* base_environ;
 
@@ -73,9 +103,24 @@ typedef struct {
   StrView url;
   StrView query;
 
-  size_t headers_size;
-  size_t headers_used;
-  HTTPHeader* headers;
+  struct {
+    size_t len;
+    size_t used;
+    HTTPHeader* fvs;
+  } headers;
+
+  struct {
+    bool sent;
+    char conlen[43];
+    PyObject* status;
+    PyObject* headers;
+  } resp;
+
+  struct {
+    size_t len;
+    size_t used;
+    uv_buf_t* bufs;
+  } send;
 
   size_t len;
   size_t used;
@@ -86,6 +131,83 @@ typedef struct {
 #define GET_REQUEST_FROM_FIELD(pointer, field)                                 \
   ((Request*) (((char*) pointer) - offsetof(Request, field)))
 #define GET_PARSER_REQUEST(pointer) GET_REQUEST_FROM_FIELD(pointer, parser)
+#define GET_THREAD_REQUEST(pointer) GET_REQUEST_FROM_FIELD(pointer, thread)
+#define GET_WRITE_REQUEST(pointer) GET_REQUEST_FROM_FIELD(pointer, write)
+
+static int handle_exc_info(PyObject* exc_info, _Bool resp_sent) {
+  if(exc_info && exc_info != Py_None) {
+    if(!PyTuple_Check(exc_info) || PyTuple_GET_SIZE(exc_info) != 3) {
+      PyErr_Format(PyExc_TypeError,
+          "start_response argument 3 must be a 3-tuple (got '%.200s' object "
+          "instead)",
+          Py_TYPE(exc_info)->tp_name);
+      return -1;
+    }
+
+    PyErr_Restore(PyTuple_GET_ITEM(exc_info, 0), PyTuple_GET_ITEM(exc_info, 1),
+        PyTuple_GET_ITEM(exc_info, 2));
+
+    if(resp_sent)
+      return -1;
+
+    PyErr_Print();
+  } else if(resp_sent) {
+    PyErr_SetString(PyExc_RuntimeError,
+        "'start_response' called more than once without passing 'exc_info' "
+        "after the first call");
+    return -1;
+  }
+
+  return 0;
+}
+
+static PyObject* start_response(PyObject* self, PyObject* const* args,
+    Py_ssize_t nargs, PyObject* kwnames) {
+
+  PyObject* exc_info = NULL;
+  static const char* _keywords[] = {"", "", "exc_info", NULL};
+  static _PyArg_Parser _parser = {
+      .keywords = _keywords,
+      .format = "OO|O:start_response",
+  };
+
+  // If you hit this you're a degenerate, don't hang on to start_response
+  // object references
+  if(!self) {
+    PyObject* temp;
+    if(_PyArg_ParseStackAndKeywords(args, nargs, kwnames, &_parser, &temp,
+           &temp, &exc_info))
+      handle_exc_info(exc_info, 1);
+    return NULL;
+  }
+
+  // We made it passed the mounties, grab the goods
+  Request* req = ((Request*) self);
+
+  if(req->resp.status) {
+    Py_DECREF(req->resp.status);
+    Py_DECREF(req->resp.headers);
+  }
+
+  if(!_PyArg_ParseStackAndKeywords(args, nargs, kwnames, &_parser,
+         &req->resp.status, &req->resp.headers, &exc_info))
+    return NULL;
+
+  if(handle_exc_info(exc_info, req->resp.sent))
+    return NULL;
+
+  Py_INCREF(req->resp.status);
+  Py_INCREF(req->resp.headers);
+
+  Py_RETURN_NONE;
+}
+
+static PyMethodDef _START_RESPONSE_DEF = {
+    "start_response",
+    (PyCFunction) start_response,
+    METH_FASTCALL | METH_KEYWORDS,
+};
+
 
 static PyObject* create_header_string(StrView field) {
   PyObject* str = PyUnicode_New(field.len + 5, 127);
@@ -96,7 +218,7 @@ static PyObject* create_header_string(StrView field) {
     // CVE-2015-0219
     // https://www.djangoproject.com/weblog/2015/jan/13/security/
     if(field.base[i] == '_') {
-      Py_DecRef(str);
+      Py_DECREF(str);
       return NULL;
     } else if(field.base[i] == '-') {
       buf[i] = '_';
@@ -183,7 +305,7 @@ static PyObject* build_environ(Request* req) {
   PyDict_SetItem(environ, _SERVER_PROTOCOL,
       req->parser.http_minor ? _HTTP_1_1 : _HTTP_1_0);
 
-  push_headers(environ, req->headers, req->headers_used);
+  push_headers(environ, req->headers.fvs, req->headers.used);
   replace_key(environ, _HTTP_CONTENT_LENGTH, _CONTENT_LENGTH);
   replace_key(environ, _HTTP_CONTENT_TYPE, _CONTENT_TYPE);
 
@@ -245,7 +367,7 @@ static int on_method(llhttp_t* parser, const char* at, size_t length) {
 
 static int on_header_field_next(llhttp_t* parser, const char*, size_t length) {
   Request* req = GET_PARSER_REQUEST(parser);
-  HTTPHeader* header = &req->headers[req->headers_used];
+  HTTPHeader* header = &req->headers.fvs[req->headers.used];
   header->field.len += length;
   return 0;
 }
@@ -253,13 +375,13 @@ static int on_header_field_next(llhttp_t* parser, const char*, size_t length) {
 static int on_header_field(llhttp_t* parser, const char* at, size_t length) {
   Request* req = GET_PARSER_REQUEST(parser);
 
-  if(req->headers_used == req->headers_size) {
-    req->headers_size <<= 1;
-    size_t alloc = req->headers_size * sizeof(*req->headers);
-    req->headers = realloc(req->headers, alloc);
+  if(req->headers.used == req->headers.len) {
+    req->headers.len <<= 1;
+    size_t alloc = req->headers.len * sizeof(*req->headers.fvs);
+    req->headers.fvs = realloc(req->headers.fvs, alloc);
   }
 
-  HTTPHeader* header = &req->headers[req->headers_used];
+  HTTPHeader* header = &req->headers.fvs[req->headers.used];
   header->field.base = at;
   header->field.len = length;
 
@@ -269,14 +391,14 @@ static int on_header_field(llhttp_t* parser, const char* at, size_t length) {
 
 static int on_header_value_next(llhttp_t* parser, const char*, size_t length) {
   Request* req = GET_PARSER_REQUEST(parser);
-  HTTPHeader* header = &req->headers[req->headers_used];
+  HTTPHeader* header = &req->headers.fvs[req->headers.used];
   header->value.len += length;
   return 0;
 }
 
 static int on_header_value(llhttp_t* parser, const char* at, size_t length) {
   Request* req = GET_PARSER_REQUEST(parser);
-  HTTPHeader* header = &req->headers[req->headers_used];
+  HTTPHeader* header = &req->headers.fvs[req->headers.used];
   header->value.base = at;
   header->value.len = length;
   req->settings.on_header_value = on_header_value_next;
@@ -285,32 +407,154 @@ static int on_header_value(llhttp_t* parser, const char* at, size_t length) {
 
 static int on_header_value_complete(llhttp_t* parser) {
   Request* req = GET_PARSER_REQUEST(parser);
-  ++req->headers_used;
+  ++req->headers.used;
   req->settings.on_header_field = on_header_field;
   req->settings.on_header_value = on_header_value;
   return 0;
 }
 
 static void free_request(Request* req) {
-  free(req->headers);
+  free(req->headers.fvs);
+  free(req->send.bufs);
+  if(req->resp.status) {
+    PyGILState_STATE state = PyGILState_Ensure();
+    Py_DECREF(req->resp.status);
+    Py_DECREF(req->resp.headers);
+    if(req->write_status == WRITE_LIST)
+      Py_DECREF(req->write.data);
+    PyGILState_Release(state);
+  }
   free(req);
 }
 
+static void free_request_worker(uv_work_t* thread) {
+  free_request(GET_THREAD_REQUEST(thread));
+}
+
 static void on_close(uv_handle_t* handle) {
-  free_request((Request*) handle);
+  Request* req = (Request*) handle;
+
+  // We might need to acquire the GIL, so do this in a thread
+  uv_queue_work(uv_default_loop(), &req->thread, free_request_worker, NULL);
+}
+
+static uv_buf_t* get_buf(Request* req) {
+  if(req->send.used == req->send.len) {
+    size_t sz = sizeof(*req->send.bufs) * req->send.len * 2;
+    req->send.bufs = realloc(req->send.bufs, sz);
+    memset(req->send.bufs + req->send.len, 0, req->send.len);
+    req->send.len *= 2;
+  }
+
+  return &(req->send.bufs[req->send.used++]);
+}
+
+// ToDo PyObject type checking
+static int buffer_headers(Request* req) {
+  BUFFER_STR(get_buf(req), _cHTTP_1_1);
+  BUFFER_PYSTR(get_buf(req), req->resp.status);
+
+  Py_ssize_t len = PyList_GET_SIZE(req->resp.headers);
+
+  for(Py_ssize_t i = 0; i < len; ++i) {
+    PyObject* tuple = PyList_GET_ITEM(req->resp.headers, i);
+    PyObject* field = PyTuple_GET_ITEM(tuple, 0);
+    PyObject* value = PyTuple_GET_ITEM(tuple, 1);
+
+    BUFFER_STR(get_buf(req), _cHTTP_rn);
+    BUFFER_PYSTR(get_buf(req), field);
+    BUFFER_STR(get_buf(req), _cHTTP_colon);
+    BUFFER_PYSTR(get_buf(req), value);
+  }
+  return 0;
+}
+
+// ToDo More type checking
+static int handle_app_ret(Request* req, PyObject* op) {
+  if(PyList_Check(op)) {
+    Py_ssize_t sz = PyList_GET_SIZE(op);
+    if(!sz) {
+      BUFFER_STR(get_buf(req), _cHTTP_rnrn);
+      return 0;
+    }
+
+    Py_INCREF(op);
+    req->write.data = op;
+    req->write_status = WRITE_LIST;
+
+    size_t conlen = 0;
+    for(Py_ssize_t i = 0; i < sz; ++i)
+      conlen += PyBytes_GET_SIZE(PyList_GET_ITEM(op, i));
+
+    int len =
+        sprintf(req->resp.conlen, "\r\nContent-Length: %zu\r\n\r\n", conlen);
+    BUFFER_STR_SIZE(get_buf(req), req->resp.conlen, len);
+
+    for(Py_ssize_t i = 0; i < sz; ++i)
+      BUFFER_PYBYTES(get_buf(req), PyList_GET_ITEM(op, i));
+
+  } else {
+    BUFFER_STR(get_buf(req), _cHTTP_rnrn);
+    req->write_status = WRITE_ITER;
+  }
+
+  return 0;
+}
+
+static void start_response_worker(uv_work_t* thread) {
+  Request* req = GET_THREAD_REQUEST(thread);
+
+  PyGILState_STATE state = PyGILState_Ensure();
+  PyObject* environ = build_environ(req);
+  PyObject* sr = PyCFunction_New(&_START_RESPONSE_DEF, NULL);
+
+  // Illegal pointer smuggling, don't tell the Python border authorities
+  ((PyCFunctionObject*) sr)->m_self = (PyObject*) req;
+  PyObject* ret = PyObject_CallFunctionObjArgs(req->app, environ, sr, NULL);
+  ((PyCFunctionObject*) sr)->m_self = NULL;
+
+  Py_XINCREF(ret);
+  Py_DECREF(environ);
+  Py_DECREF(sr);
+
+  if(!ret || buffer_headers(req) || handle_app_ret(req, ret)) {
+    req->borked = true;
+    PyErr_Print();
+  }
+
+  PyGILState_Release(state);
+}
+
+static void error_write_cb(uv_write_t* write, int /*status*/) {
+  Request* req = GET_WRITE_REQUEST(write);
+  uv_close((uv_handle_t*) req, on_close);
+}
+
+static void happy_write_cb(uv_write_t* write, int status) {
+  Request* req = GET_WRITE_REQUEST(write);
+  uv_close((uv_handle_t*) req, on_close);
+}
+
+static void start_response_worker_cb(uv_work_t* thread, int status) {
+  Request* req = GET_THREAD_REQUEST(thread);
+
+  if(req->borked) {
+    BUFFER_STR(req->send.bufs, _cHTTP_500);
+    uv_write(&req->write, (uv_stream_t*) req, req->send.bufs, 1,
+        error_write_cb);
+    return;
+  }
+
+  uv_write(&req->write, (uv_stream_t*) req, req->send.bufs, req->send.used,
+      happy_write_cb);
+  req->resp.sent = true;
 }
 
 static int on_message_complete(llhttp_t* parser) {
   Request* req = GET_PARSER_REQUEST(parser);
 
-  PyGILState_STATE state = PyGILState_Ensure();
-  PyObject* environ = build_environ(req);
-  PyObject* retval =
-      PyObject_CallFunctionObjArgs(req->app, environ, Py_None, NULL);
-  Py_DECREF(environ);
-  PyGILState_Release(state);
-
-  uv_close((uv_handle_t*) req, on_close);
+  uv_queue_work(uv_default_loop(), &req->thread, start_response_worker,
+      start_response_worker_cb);
 
   return 0;
 }
@@ -324,8 +568,11 @@ static llhttp_settings_t init_settings = {
     .on_message_complete = on_message_complete,
 };
 
-static Request* alloc_request(Server* srv, size_t buf_size, size_t hdr_count) {
+static Request* alloc_request(Server* srv, size_t buf_size, size_t hdr_count,
+    size_t send_count) {
   Request* req = malloc(sizeof(*req) + buf_size);
+
+  req->borked = false;
 
   req->app = srv->app;
   req->base_environ = srv->base_environ;
@@ -333,17 +580,29 @@ static Request* alloc_request(Server* srv, size_t buf_size, size_t hdr_count) {
   req->settings = init_settings;
   llhttp_init(&req->parser, HTTP_REQUEST, &req->settings);
 
-  req->headers = malloc(sizeof(*req->headers) * hdr_count);
-  req->headers_size = hdr_count;
-  req->headers_used = 0;
+  req->headers.fvs = malloc(sizeof(*req->headers.fvs) * hdr_count);
+  req->headers.len = hdr_count;
+  req->headers.used = 0;
+
+  req->resp.sent = false;
+  req->resp.status = NULL;
+  req->resp.headers = NULL;
+
+  size_t sz = sizeof(*req->send.bufs) * send_count;
+  req->send.bufs = malloc(sz);
+  memset(req->send.bufs, 0, sz);
+  req->send.len = send_count;
+  req->send.used = 0;
 
   req->method.len = 0;
   req->url.len = 0;
   req->query.len = 0;
 
   req->parse_idx = 0;
-  req->used = 0;
   req->len = buf_size;
+  req->used = 0;
+
+  return req;
 }
 
 static llhttp_errno_t exec_parse(Request* req) {
@@ -377,8 +636,8 @@ static void on_connect(uv_stream_t* handle, int status) {
   if(status < 0)
     return;
 
-  Request* req =
-      alloc_request((Server*) handle, DEFAULT_BUF_SIZE, DEFAULT_HEADER_COUNT);
+  Request* req = alloc_request((Server*) handle, DEFAULT_BUF_SIZE,
+      DEFAULT_HEADER_COUNT, DEFAULT_SEND_BUFFERS);
 
   uv_tcp_init(uv_default_loop(), (uv_tcp_t*) req);
   if(!uv_accept(handle, (uv_stream_t*) req))
@@ -387,7 +646,7 @@ static void on_connect(uv_stream_t* handle, int status) {
     uv_close((uv_handle_t*) req, on_close);
 }
 
-void init() {
+Py_LOCAL_SYMBOL void init() {
 #define X(str) _##str = PyUnicode_FromString(#str);
   COMMON_STRINGS(X)
 #undef X
@@ -425,8 +684,8 @@ static void handle_sigint(uv_signal_t* handle, int signum) {
   PyGILState_Release(state);
 }
 
-int run_server(char* host, PyObject* app, unsigned port, unsigned backlog) {
-
+Py_LOCAL_SYMBOL int run_server(PyObject* app, char* host, unsigned port,
+    unsigned backlog) {
   uv_signal_t t;
   uv_signal_init(uv_default_loop(), &t);
   uv_signal_start(&t, handle_sigint, 2);
@@ -451,19 +710,22 @@ int run_server(char* host, PyObject* app, unsigned port, unsigned backlog) {
   if(ret)
     return ret;
 
-  struct sockaddr* ip_addr;
   uv_getaddrinfo_t info = {};
   ret = uv_ip4_addr(host, port, &host_addr);
   if(ret) {
-    ret = uv_getaddrinfo(uv_default_loop(), &info, NULL, host, NULL, NULL);
+    static struct addrinfo hints = {
+        .ai_family = AF_INET,
+        .ai_socktype = SOCK_STREAM,
+        .ai_protocol = IPPROTO_TCP,
+    };
+    ret = uv_getaddrinfo(uv_default_loop(), &info, NULL, host, NULL, &hints);
     if(ret)
       return ret;
-    ip_addr = (struct sockaddr*) info.addrinfo;
-  } else {
-    ip_addr = (struct sockaddr*) &host_addr;
+    host_addr = *((struct sockaddr_in*) info.addrinfo->ai_addr);
+    host_addr.sin_port = htons(port);
   }
 
-  ret = uv_tcp_bind((uv_tcp_t*) &server, ip_addr, 0);
+  ret = uv_tcp_bind((uv_tcp_t*) &server, (struct sockaddr*) &host_addr, 0);
   uv_freeaddrinfo(info.addrinfo);
   if(ret)
     return ret;

@@ -1,5 +1,0 @@
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-  target_sources(velocem PRIVATE Linux.c)
-else()
-  target_sources(velocem PRIVATE Other.c)
-endif()
