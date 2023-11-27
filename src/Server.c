@@ -318,7 +318,7 @@ static PyObject* build_environ(Request* req) {
   return environ;
 }
 
-static int on_query_next(llhttp_t* parser, const char* _, size_t length) {
+static int on_query_next(llhttp_t* parser, const char*, size_t length) {
   Request* req = GET_PARSER_REQUEST(parser);
   req->query.len += length;
   return 0;
@@ -357,7 +357,7 @@ static int on_url(llhttp_t* parser, const char* at, size_t length) {
   return 0;
 }
 
-static int on_method_next(llhttp_t* parser, const char* _, size_t length) {
+static int on_method_next(llhttp_t* parser, const char*, size_t length) {
   Request* req = GET_PARSER_REQUEST(parser);
   req->method.len += length;
   return 0;
@@ -371,10 +371,10 @@ static int on_method(llhttp_t* parser, const char* at, size_t length) {
   return 0;
 }
 
-static int on_header_field_next(llhttp_t* parser, const char* _, size_t len) {
+static int on_header_field_next(llhttp_t* parser, const char*, size_t length) {
   Request* req = GET_PARSER_REQUEST(parser);
   HTTPHeader* header = &req->headers.fvs[req->headers.used];
-  header->field.len += len;
+  header->field.len += length;
   return 0;
 }
 
@@ -395,10 +395,10 @@ static int on_header_field(llhttp_t* parser, const char* at, size_t length) {
   return 0;
 }
 
-static int on_header_value_next(llhttp_t* parser, const char* _, size_t len) {
+static int on_header_value_next(llhttp_t* parser, const char*, size_t length) {
   Request* req = GET_PARSER_REQUEST(parser);
   HTTPHeader* header = &req->headers.fvs[req->headers.used];
-  header->value.len += len;
+  header->value.len += length;
   return 0;
 }
 
@@ -478,6 +478,8 @@ static int buffer_headers(Request* req) {
 // ToDo More type checking
 static int handle_app_ret(Request* req, PyObject* op) {
   if(PyList_Check(op)) {
+    buffer_headers(req);
+
     Py_ssize_t sz = PyList_GET_SIZE(op);
     if(!sz) {
       BUFFER_STR(get_buf(req), _cHTTP_rnrn);
@@ -488,12 +490,11 @@ static int handle_app_ret(Request* req, PyObject* op) {
     req->write.data = op;
     req->write_status = WRITE_LIST;
 
-    size_t conlen = 0;
+    size_t cl = 0;
     for(Py_ssize_t i = 0; i < sz; ++i)
-      conlen += PyBytes_GET_SIZE(PyList_GET_ITEM(op, i));
+      cl += PyBytes_GET_SIZE(PyList_GET_ITEM(op, i));
 
-    int len =
-        sprintf(req->resp.conlen, "\r\nContent-Length: %zu\r\n\r\n", conlen);
+    int len = sprintf(req->resp.conlen, "\r\nContent-Length: %zu\r\n\r\n", cl);
     BUFFER_STR_SIZE(get_buf(req), req->resp.conlen, len);
 
     for(Py_ssize_t i = 0; i < sz; ++i)
@@ -523,7 +524,7 @@ static void start_response_worker(uv_work_t* thread) {
   Py_DECREF(environ);
   Py_DECREF(sr);
 
-  if(!ret || buffer_headers(req) || handle_app_ret(req, ret)) {
+  if(!ret || handle_app_ret(req, ret)) {
     req->borked = true;
     PyErr_Print();
   }
@@ -531,7 +532,7 @@ static void start_response_worker(uv_work_t* thread) {
   PyGILState_Release(state);
 }
 
-static void error_write_cb(uv_write_t* write, int _ /*status*/) {
+static void error_write_cb(uv_write_t* write, int /*status*/) {
   Request* req = GET_WRITE_REQUEST(write);
   uv_close((uv_handle_t*) req, on_close);
 }
@@ -558,7 +559,7 @@ static void start_response_worker_cb(uv_work_t* thread, int status) {
 
 static int on_message_complete(llhttp_t* parser) {
   Request* req = GET_PARSER_REQUEST(parser);
-
+  uv_read_stop((uv_stream_t*) req);
   uv_queue_work(uv_default_loop(), &req->thread, start_response_worker,
       start_response_worker_cb);
 
@@ -716,7 +717,7 @@ Py_LOCAL_SYMBOL int run_server(PyObject* app, char* host, unsigned port,
   if(ret)
     return ret;
 
-  uv_getaddrinfo_t info = {0};
+  uv_getaddrinfo_t info = {};
   ret = uv_ip4_addr(host, port, &host_addr);
   if(ret) {
     static struct addrinfo hints = {

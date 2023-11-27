@@ -33,8 +33,11 @@ find_package(llhttp CONFIG REQUIRED)
 Python3_add_library(velocem MODULE)
 target_link_libraries(velocem PRIVATE libuv::uv_a llhttp::llhttp_static Python3::Module)
 
-if(MSVC)
-  target_compile_features(velocem PRIVATE c_std_17)
+if(
+  (CMAKE_C_COMPILER_ID STREQUAL "Clang") AND
+  (CMAKE_C_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+)
+  target_compile_options(velocem PRIVATE "/clang:-std=gnu2x")
 else()
   target_compile_features(velocem PRIVATE c_std_23)
 endif()

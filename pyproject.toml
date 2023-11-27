@@ -35,6 +35,9 @@ minimum_version = "3.17"
 build_type = "Release"
 build_args = ["-j"]
 
+[tool.py-build-cmake.windows.cmake]
+args = ["-T", "ClangCL"]
+
 [tool.py-build-cmake.windows.cmake.options]
 "VCPKG_TARGET_TRIPLET:STRING" = "x64-windows-static"
 "CMAKE_MSVC_RUNTIME_LIBRARY:STRING" = "MultiThreaded"
