@@ -97,6 +97,7 @@ typedef struct {
   } write_status;
 
   uv_work_t thread;
+  bool keepalive;
   bool borked;
 
   PyObject* app;
@@ -419,9 +420,7 @@ static int on_header_value_complete(llhttp_t* parser) {
   return 0;
 }
 
-static void free_request(Request* req) {
-  free(req->headers.fvs);
-  free(req->send.bufs);
+static void clean_request(Request* req) {
   if(req->resp.status) {
     PyGILState_STATE state = PyGILState_Ensure();
     Py_DECREF(req->resp.status);
@@ -430,12 +429,19 @@ static void free_request(Request* req) {
       Py_DECREF(req->write.data);
     PyGILState_Release(state);
   }
+}
+
+static void free_request(Request* req) {
+  free(req->headers.fvs);
+  free(req->send.bufs);
+  clean_request(req);
   free(req);
 }
 
 static void free_request_worker(uv_work_t* thread) {
   free_request(GET_THREAD_REQUEST(thread));
 }
+
 
 static void on_close(uv_handle_t* handle) {
   Request* req = (Request*) handle;
@@ -477,33 +483,42 @@ static int buffer_headers(Request* req) {
 
 // ToDo More type checking
 static int handle_app_ret(Request* req, PyObject* op) {
-  if(PyList_Check(op)) {
-    buffer_headers(req);
 
-    Py_ssize_t sz = PyList_GET_SIZE(op);
-    if(!sz) {
-      BUFFER_STR(get_buf(req), _cHTTP_rnrn);
-      return 0;
-    }
+#define X(tp)                                                                  \
+  (Py##tp##_Check(op)) {                                                       \
+    buffer_headers(req);                                                       \
+                                                                               \
+    Py_ssize_t sz = Py##tp##_GET_SIZE(op);                                     \
+    if(!sz) {                                                                  \
+      BUFFER_STR(get_buf(req), _cHTTP_rnrn);                                   \
+      return 0;                                                                \
+    }                                                                          \
+                                                                               \
+    Py_INCREF(op);                                                             \
+    req->write.data = op;                                                      \
+    req->write_status = WRITE_LIST;                                            \
+                                                                               \
+    size_t cl = 0;                                                             \
+    for(Py_ssize_t i = 0; i < sz; ++i)                                         \
+      cl += PyBytes_GET_SIZE(Py##tp##_GET_ITEM(op, i));                        \
+                                                                               \
+    int len =                                                                  \
+        sprintf(req->resp.conlen, "\r\nContent-Length: %zu\r\n\r\n", cl);      \
+    BUFFER_STR_SIZE(get_buf(req), req->resp.conlen, len);                      \
+                                                                               \
+    for(Py_ssize_t i = 0; i < sz; ++i)                                         \
+      BUFFER_PYBYTES(get_buf(req), Py##tp##_GET_ITEM(op, i));                  \
+  }
 
-    Py_INCREF(op);
-    req->write.data = op;
-    req->write_status = WRITE_LIST;
-
-    size_t cl = 0;
-    for(Py_ssize_t i = 0; i < sz; ++i)
-      cl += PyBytes_GET_SIZE(PyList_GET_ITEM(op, i));
-
-    int len = sprintf(req->resp.conlen, "\r\nContent-Length: %zu\r\n\r\n", cl);
-    BUFFER_STR_SIZE(get_buf(req), req->resp.conlen, len);
-
-    for(Py_ssize_t i = 0; i < sz; ++i)
-      BUFFER_PYBYTES(get_buf(req), PyList_GET_ITEM(op, i));
-
-  } else {
+  // clang-format off
+  if X(List)
+  else if X(Tuple)
+  else {
     BUFFER_STR(get_buf(req), _cHTTP_rnrn);
     req->write_status = WRITE_ITER;
   }
+  #undef X
+  // clang-format on
 
   return 0;
 }
@@ -537,12 +552,16 @@ static void error_write_cb(uv_write_t* write, int /*status*/) {
   uv_close((uv_handle_t*) req, on_close);
 }
 
-static void happy_write_cb(uv_write_t* write, int status) {
+static void happy_write_cb(uv_write_t* write, int /*status*/) {
   Request* req = GET_WRITE_REQUEST(write);
-  uv_close((uv_handle_t*) req, on_close);
+
+  // No read cb set and no other request behind us, this is the last request
+  // we'll be handling
+  if(!req->client.read_cb && !req->keepalive)
+    uv_close((uv_handle_t*) req, on_close);
 }
 
-static void start_response_worker_cb(uv_work_t* thread, int status) {
+static void start_response_worker_cb(uv_work_t* thread, int /*status*/) {
   Request* req = GET_THREAD_REQUEST(thread);
 
   if(req->borked) {
@@ -560,10 +579,12 @@ static void start_response_worker_cb(uv_work_t* thread, int status) {
 static int on_message_complete(llhttp_t* parser) {
   Request* req = GET_PARSER_REQUEST(parser);
   uv_read_stop((uv_stream_t*) req);
+
+  req->keepalive = llhttp_should_keep_alive(parser);
   uv_queue_work(uv_default_loop(), &req->thread, start_response_worker,
       start_response_worker_cb);
 
-  return 0;
+  return req->keepalive ? HPE_PAUSED : 0;
 }
 
 static llhttp_settings_t init_settings = {
@@ -580,6 +601,7 @@ static Request* alloc_request(Server* srv, size_t buf_size, size_t hdr_count,
   Request* req = malloc(sizeof(*req) + buf_size);
 
   req->borked = false;
+  req->keepalive = false;
 
   req->app = srv->app;
   req->base_environ = srv->base_environ;
@@ -625,6 +647,8 @@ static void alloc_buffer(uv_handle_t* handle, size_t hint, uv_buf_t* buf) {
   buf->len = req->len - req->used;
 }
 
+static void handle_parse(Request* req);
+
 static void on_read(uv_stream_t* client, ssize_t nRead, const uv_buf_t* buf) {
   if(nRead < 0) {
     uv_close((uv_handle_t*) client, on_close);
@@ -632,11 +656,50 @@ static void on_read(uv_stream_t* client, ssize_t nRead, const uv_buf_t* buf) {
   }
 
   Request* req = (Request*) client;
-
   req->used += nRead;
+
+  handle_parse(req);
+}
+
+static void resume_request_worker(uv_work_t* thread) {
+  Request* req = GET_THREAD_REQUEST(thread);
+  clean_request(req);
+
+  req->headers.used = 0;
+  req->resp.sent = false;
+  req->send.used = 0;
+  req->parse_idx = 0;
+
+  const char* endp = llhttp_get_error_pos(&req->parser);
+  const char* used_endp = req->buf + req->used;
+
+  if(endp == used_endp) {
+    req->used = 0;
+  } else {
+    size_t dist = used_endp - endp;
+    memcpy(req->buf, endp + 1, dist);
+    req->used = dist;
+  }
+
+  llhttp_resume(&req->parser);
+}
+
+static void resume_request_cb(uv_work_t* thread, int /*status*/) {
+  Request* req = GET_THREAD_REQUEST(thread);
+  req->keepalive = false;
+  uv_read_start((uv_stream_t*) req, alloc_buffer, on_read);
+  handle_parse(req);
+}
+
+static void handle_parse(Request* req) {
   llhttp_errno_t err = exec_parse(req);
-  if(err != HPE_OK)
-    uv_close((uv_handle_t*) client, on_close);
+
+  // Message complete and keep-alive == true
+  if(err == HPE_PAUSED)
+    uv_queue_work(uv_default_loop(), &req->thread, resume_request_worker,
+        resume_request_cb);
+  else if(err != HPE_OK)
+    uv_close((uv_handle_t*) req, on_close);
 }
 
 static void on_connect(uv_stream_t* handle, int status) {
