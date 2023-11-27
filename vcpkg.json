@@ -14,18 +14,8 @@
   "vcpkg-configuration": {
     "default-registry": {
       "kind": "git",
-      "baseline": "830f86fb309ad7167468a433a890b7415fbb90a5",
+      "baseline": "cd5e746ec203c8c3c61647e0886a8df8c1e78e41",
       "repository": "https://github.com/microsoft/vcpkg.git"
-    },
-    "registries": [
-      {
-        "kind": "git",
-        "baseline": "46d52333820ada90be0e3fa9addc5d62e8abf5bd",
-        "repository": "https://github.com/nickelpro/vito-reg.git",
-        "packages": [
-          "vdap"
-        ]
-      }
-    ]
+    }
   }
 }
