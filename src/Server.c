@@ -88,10 +88,9 @@ typedef struct {
 } Server;
 
 static const unsigned REQ_KEEPALIVE = 1 << 0;
-static const unsigned RECEIVING_ACTIVE = 1 << 1;
-static const unsigned RECEIVING_DONE = 1 << 2;
-static const unsigned PROCESSING_ACTIVE = 1 << 3;
-static const unsigned SENDING_ACTIVE = 1 << 4;
+static const unsigned RECEIVING_DONE = 1 << 1;
+static const unsigned PROCESSING_ACTIVE = 1 << 2;
+static const unsigned SENDING_ACTIVE = 1 << 3;
 
 typedef struct {
   uv_tcp_t client;
@@ -146,8 +145,6 @@ typedef struct {
 #define GET_THREAD_REQUEST(pointer) GET_REQUEST_FROM_FIELD(pointer, thread)
 #define GET_RECV_REQUEST(pointer) GET_REQUEST_FROM_FIELD(pointer, recv_th)
 #define GET_WRITE_REQUEST(pointer) GET_REQUEST_FROM_FIELD(pointer, write)
-
-static void great_state_inspector(Request* req);
 
 static int handle_exc_info(PyObject* exc_info, _Bool resp_sent) {
   if(exc_info && exc_info != Py_None) {
@@ -457,10 +454,13 @@ static void recycle_request_worker(uv_work_t* thread) {
   clean_request(req);
 }
 
+static void start_processing(Request* req);
+
 static void recycle_request_cb(uv_work_t* thread, int /*status*/) {
   Request* req = GET_THREAD_REQUEST(thread);
   req->state &= ~SENDING_ACTIVE;
-  great_state_inspector(req);
+  if(req->state & RECEIVING_DONE)
+    start_processing(req);
 }
 
 
@@ -559,7 +559,6 @@ static int handle_tuple(Request* req, PyObject* op) {
 
 // ToDo More type checking
 static int handle_app_ret(Request* req, PyObject* op) {
-  // clang-format off
   if(PyList_Check(op)) {
     return handle_list(req, op);
   } else if(PyTuple_Check(op)) {
@@ -607,6 +606,8 @@ static void happy_write_cb(uv_write_t* write, int /*status*/) {
         recycle_request_cb);
 }
 
+static void resume_recv(Request* req);
+
 static void start_response_worker_cb(uv_work_t* thread, int /*status*/) {
   Request* req = GET_THREAD_REQUEST(thread);
   req->state &= ~RECEIVING_DONE;
@@ -618,6 +619,9 @@ static void start_response_worker_cb(uv_work_t* thread, int /*status*/) {
         error_write_cb);
     return;
   }
+
+  if(req->state & REQ_KEEPALIVE)
+    resume_recv(req);
 
   uv_write(&req->write, (uv_stream_t*) req, req->send.bufs, req->send.used,
       happy_write_cb);
@@ -631,7 +635,6 @@ static void start_processing(Request* req) {
 
 static int on_message_complete(llhttp_t* parser) {
   Request* req = GET_PARSER_REQUEST(parser);
-  req->state &= ~RECEIVING_ACTIVE;
   req->state |= RECEIVING_DONE;
   uv_read_stop((uv_stream_t*) req);
 
@@ -657,7 +660,7 @@ static Request* alloc_request(Server* srv, size_t buf_size, size_t hdr_count,
     size_t send_count) {
   Request* req = malloc(sizeof(*req) + buf_size);
 
-  req->state = RECEIVING_ACTIVE;
+  req->state = 0;
   req->borked = false;
 
   req->app = srv->app;
@@ -718,7 +721,6 @@ static void on_read(uv_stream_t* client, ssize_t nRead, const uv_buf_t* buf) {
 }
 
 static void resume_recv(Request* req) {
-  req->state |= RECEIVING_ACTIVE;
   req->headers.used = 0;
   req->parse_idx = 0;
 
@@ -729,7 +731,7 @@ static void resume_recv(Request* req) {
     req->used = 0;
   } else {
     size_t dist = used_endp - endp;
-    memcpy(req->buf, endp + 1, dist);
+    memcpy(req->buf, endp, dist);
     req->used = dist;
   }
 
@@ -743,23 +745,9 @@ static void handle_parse(Request* req) {
 
   if(err != HPE_OK && err != HPE_PAUSED)
     uv_close((uv_handle_t*) req, on_close);
-  else if(req->state & RECEIVING_DONE)
-    great_state_inspector(req);
-}
-
-static void great_state_inspector(Request* req) {
-  bool re_active = req->state & RECEIVING_ACTIVE;
-  bool re_done = req->state & RECEIVING_DONE;
-  bool pr_active = req->state & PROCESSING_ACTIVE;
-  bool sd_active = req->state & SENDING_ACTIVE;
-  bool keepalive = req->state & REQ_KEEPALIVE;
-
-  if(re_done && !pr_active && !sd_active)
+  else if((req->state & RECEIVING_DONE) && !(req->state & PROCESSING_ACTIVE) &&
+      !(req->state & SENDING_ACTIVE))
     start_processing(req);
-  else if(!re_active && !re_done && keepalive)
-    resume_recv(req);
-  else if(!req->state)
-    uv_close((uv_handle_t*) req, on_close);
 }
 
 static void on_connect(uv_stream_t* handle, int status) {
@@ -771,7 +759,6 @@ static void on_connect(uv_stream_t* handle, int status) {
 
   uv_tcp_init(uv_default_loop(), (uv_tcp_t*) req);
   if(!uv_accept(handle, (uv_stream_t*) req)) {
-    req->state |= RECEIVING_ACTIVE;
     uv_read_start((uv_stream_t*) req, alloc_buffer, on_read);
   } else {
     uv_close((uv_handle_t*) req, on_close);
