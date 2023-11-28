@@ -1,4 +1,7 @@
 .vscode/
+.venv/
 build/
 test/
 dist/
+bm/
+requirements.txt

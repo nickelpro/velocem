@@ -453,6 +453,8 @@ static void recycle_request_worker(uv_work_t* thread) {
   Request* req = GET_THREAD_REQUEST(thread);
   req->send.used = 0;
   req->resp.status = NULL;
+  req->settings.on_url = on_url;
+  req->settings.on_method = on_method;
   clean_request(req);
 }
 
