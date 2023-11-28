@@ -427,7 +427,10 @@ static int on_header_value_complete(llhttp_t* parser) {
   return 0;
 }
 
-static void clean_request(Request* req) {
+
+static void free_request(Request* req) {
+  free(req->headers.fvs);
+  free(req->send.bufs);
   if(req->resp.status) {
     PyGILState_STATE state = PyGILState_Ensure();
     Py_DECREF(req->resp.status);
@@ -436,35 +439,11 @@ static void clean_request(Request* req) {
       Py_DECREF(req->write.data);
     PyGILState_Release(state);
   }
-}
-
-static void free_request(Request* req) {
-  free(req->headers.fvs);
-  free(req->send.bufs);
-  clean_request(req);
   free(req);
 }
 
 static void free_request_worker(uv_work_t* thread) {
   free_request(GET_THREAD_REQUEST(thread));
-}
-
-static void recycle_request_worker(uv_work_t* thread) {
-  Request* req = GET_THREAD_REQUEST(thread);
-  req->send.used = 0;
-  req->resp.status = NULL;
-  req->settings.on_url = on_url;
-  req->settings.on_method = on_method;
-  clean_request(req);
-}
-
-static void start_processing(Request* req);
-
-static void recycle_request_cb(uv_work_t* thread, int /*status*/) {
-  Request* req = GET_THREAD_REQUEST(thread);
-  req->state.sending = false;
-  if(req->state.received)
-    start_processing(req);
 }
 
 
@@ -603,11 +582,20 @@ static void error_write_cb(uv_write_t* write, int /*status*/) {
   uv_close((uv_handle_t*) req, on_close);
 }
 
+static void start_processing(Request* req);
+
 static void happy_write_cb(uv_write_t* write, int /*status*/) {
   Request* req = GET_WRITE_REQUEST(write);
-  if(!req->state.processing && req->state.keepalive)
-    uv_queue_work(uv_default_loop(), &req->thread, recycle_request_worker,
-        recycle_request_cb);
+  if(!req->state.processing && req->state.keepalive) {
+    req->send.used = 0;
+    req->resp.status = NULL;
+    req->settings.on_url = on_url;
+    req->settings.on_method = on_method;
+
+    req->state.sending = false;
+    if(req->state.received)
+      start_processing(req);
+  }
 }
 
 static void resume_recv(Request* req);
