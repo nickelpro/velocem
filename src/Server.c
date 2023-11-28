@@ -9,6 +9,9 @@
 #include <llhttp.h>
 #include <uv.h>
 
+// Until EDG learns what a bool is
+#include "Intellisense.h"
+
 // Get the actual fuck out of here with this shit MSVC
 #ifdef environ
 #undef environ
@@ -87,11 +90,6 @@ typedef struct {
   PyObject* base_environ;
 } Server;
 
-static const unsigned REQ_KEEPALIVE = 1 << 0;
-static const unsigned RECEIVING_DONE = 1 << 1;
-static const unsigned PROCESSING_ACTIVE = 1 << 2;
-static const unsigned SENDING_ACTIVE = 1 << 3;
-
 typedef struct {
   uv_tcp_t client;
 
@@ -102,8 +100,13 @@ typedef struct {
   } write_status;
 
   uv_work_t thread;
-  bool borked;
-  uint8_t state;
+  struct {
+    bool borked : 1;
+    bool keepalive : 1;
+    bool received : 1;
+    bool processing : 1;
+    bool sending : 1;
+  } state;
 
   PyObject* app;
   PyObject* base_environ;
@@ -143,7 +146,6 @@ typedef struct {
   ((Request*) (((char*) pointer) - offsetof(Request, field)))
 #define GET_PARSER_REQUEST(pointer) GET_REQUEST_FROM_FIELD(pointer, parser)
 #define GET_THREAD_REQUEST(pointer) GET_REQUEST_FROM_FIELD(pointer, thread)
-#define GET_RECV_REQUEST(pointer) GET_REQUEST_FROM_FIELD(pointer, recv_th)
 #define GET_WRITE_REQUEST(pointer) GET_REQUEST_FROM_FIELD(pointer, write)
 
 static int handle_exc_info(PyObject* exc_info, _Bool resp_sent) {
@@ -205,7 +207,7 @@ static PyObject* start_response(PyObject* self, PyObject* const* args,
          &req->resp.status, &req->resp.headers, &exc_info))
     return NULL;
 
-  if(handle_exc_info(exc_info, req->state & SENDING_ACTIVE))
+  if(handle_exc_info(exc_info, req->state.sending))
     return NULL;
 
   Py_INCREF(req->resp.status);
@@ -458,8 +460,8 @@ static void start_processing(Request* req);
 
 static void recycle_request_cb(uv_work_t* thread, int /*status*/) {
   Request* req = GET_THREAD_REQUEST(thread);
-  req->state &= ~SENDING_ACTIVE;
-  if(req->state & RECEIVING_DONE)
+  req->state.sending = false;
+  if(req->state.received)
     start_processing(req);
 }
 
@@ -526,7 +528,7 @@ static int handle_list(Request* req, PyObject* op) {
   for(Py_ssize_t i = 0; i < sz; ++i)
     BUFFER_PYBYTES(get_buf(req), PyList_GET_ITEM(op, i));
 
-  req->state &= ~PROCESSING_ACTIVE;
+  req->state.processing = false;
   return 0;
 }
 
@@ -553,7 +555,7 @@ static int handle_tuple(Request* req, PyObject* op) {
   for(Py_ssize_t i = 0; i < sz; ++i)
     BUFFER_PYBYTES(get_buf(req), PyTuple_GET_ITEM(op, i));
 
-  req->state &= ~PROCESSING_ACTIVE;
+  req->state.processing = false;
   return 0;
 }
 
@@ -587,7 +589,7 @@ static void start_response_worker(uv_work_t* thread) {
   Py_DECREF(sr);
 
   if(!ret || handle_app_ret(req, ret)) {
-    req->borked = true;
+    req->state.borked = true;
     PyErr_Print();
   }
 
@@ -601,7 +603,7 @@ static void error_write_cb(uv_write_t* write, int /*status*/) {
 
 static void happy_write_cb(uv_write_t* write, int /*status*/) {
   Request* req = GET_WRITE_REQUEST(write);
-  if(!(req->state & PROCESSING_ACTIVE) && (req->state & REQ_KEEPALIVE))
+  if(!req->state.processing && req->state.keepalive)
     uv_queue_work(uv_default_loop(), &req->thread, recycle_request_worker,
         recycle_request_cb);
 }
@@ -610,17 +612,18 @@ static void resume_recv(Request* req);
 
 static void start_response_worker_cb(uv_work_t* thread, int /*status*/) {
   Request* req = GET_THREAD_REQUEST(thread);
-  req->state &= ~RECEIVING_DONE;
-  req->state |= SENDING_ACTIVE;
 
-  if(req->borked) {
+  if(req->state.borked) {
     BUFFER_STR(req->send.bufs, _cHTTP_500);
     uv_write(&req->write, (uv_stream_t*) req, req->send.bufs, 1,
         error_write_cb);
     return;
   }
 
-  if(req->state & REQ_KEEPALIVE)
+  req->state.received = false;
+  req->state.sending = true;
+
+  if(req->state.keepalive)
     resume_recv(req);
 
   uv_write(&req->write, (uv_stream_t*) req, req->send.bufs, req->send.used,
@@ -628,23 +631,18 @@ static void start_response_worker_cb(uv_work_t* thread, int /*status*/) {
 }
 
 static void start_processing(Request* req) {
-  req->state |= PROCESSING_ACTIVE;
+  req->state.processing = true;
   uv_queue_work(uv_default_loop(), &req->thread, start_response_worker,
       start_response_worker_cb);
 }
 
 static int on_message_complete(llhttp_t* parser) {
   Request* req = GET_PARSER_REQUEST(parser);
-  req->state |= RECEIVING_DONE;
+  req->state.received = true;
   uv_read_stop((uv_stream_t*) req);
 
-  bool keepalive = llhttp_should_keep_alive(parser);
-  if(keepalive)
-    req->state |= REQ_KEEPALIVE;
-  else
-    req->state &= ~REQ_KEEPALIVE;
-
-  return keepalive ? HPE_PAUSED : 0;
+  req->state.keepalive = llhttp_should_keep_alive(parser);
+  return req->state.keepalive ? HPE_PAUSED : 0;
 }
 
 static llhttp_settings_t init_settings = {
@@ -660,8 +658,7 @@ static Request* alloc_request(Server* srv, size_t buf_size, size_t hdr_count,
     size_t send_count) {
   Request* req = malloc(sizeof(*req) + buf_size);
 
-  req->state = 0;
-  req->borked = false;
+  memset(&req->state, 0, sizeof(req->state));
 
   req->app = srv->app;
   req->base_environ = srv->base_environ;
@@ -745,8 +742,7 @@ static void handle_parse(Request* req) {
 
   if(err != HPE_OK && err != HPE_PAUSED)
     uv_close((uv_handle_t*) req, on_close);
-  else if((req->state & RECEIVING_DONE) && !(req->state & PROCESSING_ACTIVE) &&
-      !(req->state & SENDING_ACTIVE))
+  else if(req->state.received && !req->state.processing && !req->state.sending)
     start_processing(req);
 }
 
