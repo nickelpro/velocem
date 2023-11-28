@@ -87,6 +87,12 @@ typedef struct {
   PyObject* base_environ;
 } Server;
 
+static const unsigned REQ_KEEPALIVE = 1 << 0;
+static const unsigned RECEIVING_ACTIVE = 1 << 1;
+static const unsigned RECEIVING_DONE = 1 << 2;
+static const unsigned PROCESSING_ACTIVE = 1 << 3;
+static const unsigned SENDING_ACTIVE = 1 << 4;
+
 typedef struct {
   uv_tcp_t client;
 
@@ -97,8 +103,8 @@ typedef struct {
   } write_status;
 
   uv_work_t thread;
-  bool keepalive;
   bool borked;
+  uint8_t state;
 
   PyObject* app;
   PyObject* base_environ;
@@ -117,7 +123,6 @@ typedef struct {
   } headers;
 
   struct {
-    bool sent;
     char conlen[43];
     PyObject* status;
     PyObject* headers;
@@ -139,7 +144,10 @@ typedef struct {
   ((Request*) (((char*) pointer) - offsetof(Request, field)))
 #define GET_PARSER_REQUEST(pointer) GET_REQUEST_FROM_FIELD(pointer, parser)
 #define GET_THREAD_REQUEST(pointer) GET_REQUEST_FROM_FIELD(pointer, thread)
+#define GET_RECV_REQUEST(pointer) GET_REQUEST_FROM_FIELD(pointer, recv_th)
 #define GET_WRITE_REQUEST(pointer) GET_REQUEST_FROM_FIELD(pointer, write)
+
+static void great_state_inspector(Request* req);
 
 static int handle_exc_info(PyObject* exc_info, _Bool resp_sent) {
   if(exc_info && exc_info != Py_None) {
@@ -200,7 +208,7 @@ static PyObject* start_response(PyObject* self, PyObject* const* args,
          &req->resp.status, &req->resp.headers, &exc_info))
     return NULL;
 
-  if(handle_exc_info(exc_info, req->resp.sent))
+  if(handle_exc_info(exc_info, req->state & SENDING_ACTIVE))
     return NULL;
 
   Py_INCREF(req->resp.status);
@@ -442,6 +450,19 @@ static void free_request_worker(uv_work_t* thread) {
   free_request(GET_THREAD_REQUEST(thread));
 }
 
+static void recycle_request_worker(uv_work_t* thread) {
+  Request* req = GET_THREAD_REQUEST(thread);
+  req->send.used = 0;
+  req->resp.status = NULL;
+  clean_request(req);
+}
+
+static void recycle_request_cb(uv_work_t* thread, int /*status*/) {
+  Request* req = GET_THREAD_REQUEST(thread);
+  req->state &= ~SENDING_ACTIVE;
+  great_state_inspector(req);
+}
+
 
 static void on_close(uv_handle_t* handle) {
   Request* req = (Request*) handle;
@@ -481,51 +502,78 @@ static int buffer_headers(Request* req) {
   return 0;
 }
 
+static int handle_list(Request* req, PyObject* op) {
+
+  buffer_headers(req);
+
+  Py_ssize_t sz = PyList_GET_SIZE(op);
+  if(!sz) {
+    BUFFER_STR(get_buf(req), _cHTTP_rnrn);
+    return 0;
+  }
+
+  Py_INCREF(op);
+  req->write.data = op;
+  req->write_status = WRITE_LIST;
+
+  size_t cl = 0;
+  for(Py_ssize_t i = 0; i < sz; ++i)
+    cl += PyBytes_GET_SIZE(PyList_GET_ITEM(op, i));
+
+  int len = sprintf(req->resp.conlen, "\r\nContent-Length: %zu\r\n\r\n", cl);
+  BUFFER_STR_SIZE(get_buf(req), req->resp.conlen, len);
+
+  for(Py_ssize_t i = 0; i < sz; ++i)
+    BUFFER_PYBYTES(get_buf(req), PyList_GET_ITEM(op, i));
+
+  req->state &= ~PROCESSING_ACTIVE;
+  return 0;
+}
+
+static int handle_tuple(Request* req, PyObject* op) {
+  buffer_headers(req);
+
+  Py_ssize_t sz = PyTuple_GET_SIZE(op);
+  if(!sz) {
+    BUFFER_STR(get_buf(req), _cHTTP_rnrn);
+    return 0;
+  }
+
+  Py_INCREF(op);
+  req->write.data = op;
+  req->write_status = WRITE_LIST;
+
+  size_t cl = 0;
+  for(Py_ssize_t i = 0; i < sz; ++i)
+    cl += PyBytes_GET_SIZE(PyTuple_GET_ITEM(op, i));
+
+  int len = sprintf(req->resp.conlen, "\r\nContent-Length: %zu\r\n\r\n", cl);
+  BUFFER_STR_SIZE(get_buf(req), req->resp.conlen, len);
+
+  for(Py_ssize_t i = 0; i < sz; ++i)
+    BUFFER_PYBYTES(get_buf(req), PyTuple_GET_ITEM(op, i));
+
+  req->state &= ~PROCESSING_ACTIVE;
+  return 0;
+}
+
 // ToDo More type checking
 static int handle_app_ret(Request* req, PyObject* op) {
-
-#define X(tp)                                                                  \
-  (Py##tp##_Check(op)) {                                                       \
-    buffer_headers(req);                                                       \
-                                                                               \
-    Py_ssize_t sz = Py##tp##_GET_SIZE(op);                                     \
-    if(!sz) {                                                                  \
-      BUFFER_STR(get_buf(req), _cHTTP_rnrn);                                   \
-      return 0;                                                                \
-    }                                                                          \
-                                                                               \
-    Py_INCREF(op);                                                             \
-    req->write.data = op;                                                      \
-    req->write_status = WRITE_LIST;                                            \
-                                                                               \
-    size_t cl = 0;                                                             \
-    for(Py_ssize_t i = 0; i < sz; ++i)                                         \
-      cl += PyBytes_GET_SIZE(Py##tp##_GET_ITEM(op, i));                        \
-                                                                               \
-    int len =                                                                  \
-        sprintf(req->resp.conlen, "\r\nContent-Length: %zu\r\n\r\n", cl);      \
-    BUFFER_STR_SIZE(get_buf(req), req->resp.conlen, len);                      \
-                                                                               \
-    for(Py_ssize_t i = 0; i < sz; ++i)                                         \
-      BUFFER_PYBYTES(get_buf(req), Py##tp##_GET_ITEM(op, i));                  \
-  }
-
   // clang-format off
-  if X(List)
-  else if X(Tuple)
-  else {
+  if(PyList_Check(op)) {
+    return handle_list(req, op);
+  } else if(PyTuple_Check(op)) {
+    return handle_tuple(req, op);
+  } else {
     BUFFER_STR(get_buf(req), _cHTTP_rnrn);
     req->write_status = WRITE_ITER;
+    return 0;
   }
-  #undef X
-  // clang-format on
-
-  return 0;
+  return 1;
 }
 
 static void start_response_worker(uv_work_t* thread) {
   Request* req = GET_THREAD_REQUEST(thread);
-
   PyGILState_STATE state = PyGILState_Ensure();
   PyObject* environ = build_environ(req);
   PyObject* sr = PyCFunction_New(&_START_RESPONSE_DEF, NULL);
@@ -554,15 +602,15 @@ static void error_write_cb(uv_write_t* write, int /*status*/) {
 
 static void happy_write_cb(uv_write_t* write, int /*status*/) {
   Request* req = GET_WRITE_REQUEST(write);
-
-  // No read cb set and no other request behind us, this is the last request
-  // we'll be handling
-  if(!req->client.read_cb && !req->keepalive)
-    uv_close((uv_handle_t*) req, on_close);
+  if(!(req->state & PROCESSING_ACTIVE) && (req->state & REQ_KEEPALIVE))
+    uv_queue_work(uv_default_loop(), &req->thread, recycle_request_worker,
+        recycle_request_cb);
 }
 
 static void start_response_worker_cb(uv_work_t* thread, int /*status*/) {
   Request* req = GET_THREAD_REQUEST(thread);
+  req->state &= ~RECEIVING_DONE;
+  req->state |= SENDING_ACTIVE;
 
   if(req->borked) {
     BUFFER_STR(req->send.bufs, _cHTTP_500);
@@ -573,18 +621,27 @@ static void start_response_worker_cb(uv_work_t* thread, int /*status*/) {
 
   uv_write(&req->write, (uv_stream_t*) req, req->send.bufs, req->send.used,
       happy_write_cb);
-  req->resp.sent = true;
+}
+
+static void start_processing(Request* req) {
+  req->state |= PROCESSING_ACTIVE;
+  uv_queue_work(uv_default_loop(), &req->thread, start_response_worker,
+      start_response_worker_cb);
 }
 
 static int on_message_complete(llhttp_t* parser) {
   Request* req = GET_PARSER_REQUEST(parser);
+  req->state &= ~RECEIVING_ACTIVE;
+  req->state |= RECEIVING_DONE;
   uv_read_stop((uv_stream_t*) req);
 
-  req->keepalive = llhttp_should_keep_alive(parser);
-  uv_queue_work(uv_default_loop(), &req->thread, start_response_worker,
-      start_response_worker_cb);
+  bool keepalive = llhttp_should_keep_alive(parser);
+  if(keepalive)
+    req->state |= REQ_KEEPALIVE;
+  else
+    req->state &= ~REQ_KEEPALIVE;
 
-  return req->keepalive ? HPE_PAUSED : 0;
+  return keepalive ? HPE_PAUSED : 0;
 }
 
 static llhttp_settings_t init_settings = {
@@ -600,8 +657,8 @@ static Request* alloc_request(Server* srv, size_t buf_size, size_t hdr_count,
     size_t send_count) {
   Request* req = malloc(sizeof(*req) + buf_size);
 
+  req->state = RECEIVING_ACTIVE;
   req->borked = false;
-  req->keepalive = false;
 
   req->app = srv->app;
   req->base_environ = srv->base_environ;
@@ -613,7 +670,6 @@ static Request* alloc_request(Server* srv, size_t buf_size, size_t hdr_count,
   req->headers.len = hdr_count;
   req->headers.used = 0;
 
-  req->resp.sent = false;
   req->resp.status = NULL;
   req->resp.headers = NULL;
 
@@ -661,13 +717,9 @@ static void on_read(uv_stream_t* client, ssize_t nRead, const uv_buf_t* buf) {
   handle_parse(req);
 }
 
-static void resume_request_worker(uv_work_t* thread) {
-  Request* req = GET_THREAD_REQUEST(thread);
-  clean_request(req);
-
+static void resume_recv(Request* req) {
+  req->state |= RECEIVING_ACTIVE;
   req->headers.used = 0;
-  req->resp.sent = false;
-  req->send.used = 0;
   req->parse_idx = 0;
 
   const char* endp = llhttp_get_error_pos(&req->parser);
@@ -682,11 +734,6 @@ static void resume_request_worker(uv_work_t* thread) {
   }
 
   llhttp_resume(&req->parser);
-}
-
-static void resume_request_cb(uv_work_t* thread, int /*status*/) {
-  Request* req = GET_THREAD_REQUEST(thread);
-  req->keepalive = false;
   uv_read_start((uv_stream_t*) req, alloc_buffer, on_read);
   handle_parse(req);
 }
@@ -694,11 +741,24 @@ static void resume_request_cb(uv_work_t* thread, int /*status*/) {
 static void handle_parse(Request* req) {
   llhttp_errno_t err = exec_parse(req);
 
-  // Message complete and keep-alive == true
-  if(err == HPE_PAUSED)
-    uv_queue_work(uv_default_loop(), &req->thread, resume_request_worker,
-        resume_request_cb);
-  else if(err != HPE_OK)
+  if(err != HPE_OK && err != HPE_PAUSED)
+    uv_close((uv_handle_t*) req, on_close);
+  else if(req->state & RECEIVING_DONE)
+    great_state_inspector(req);
+}
+
+static void great_state_inspector(Request* req) {
+  bool re_active = req->state & RECEIVING_ACTIVE;
+  bool re_done = req->state & RECEIVING_DONE;
+  bool pr_active = req->state & PROCESSING_ACTIVE;
+  bool sd_active = req->state & SENDING_ACTIVE;
+  bool keepalive = req->state & REQ_KEEPALIVE;
+
+  if(re_done && !pr_active && !sd_active)
+    start_processing(req);
+  else if(!re_active && !re_done && keepalive)
+    resume_recv(req);
+  else if(!req->state)
     uv_close((uv_handle_t*) req, on_close);
 }
 
@@ -710,10 +770,12 @@ static void on_connect(uv_stream_t* handle, int status) {
       DEFAULT_HEADER_COUNT, DEFAULT_SEND_BUFFERS);
 
   uv_tcp_init(uv_default_loop(), (uv_tcp_t*) req);
-  if(!uv_accept(handle, (uv_stream_t*) req))
+  if(!uv_accept(handle, (uv_stream_t*) req)) {
+    req->state |= RECEIVING_ACTIVE;
     uv_read_start((uv_stream_t*) req, alloc_buffer, on_read);
-  else
+  } else {
     uv_close((uv_handle_t*) req, on_close);
+  }
 }
 
 Py_LOCAL_SYMBOL void init() {
