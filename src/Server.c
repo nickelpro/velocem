@@ -103,8 +103,11 @@ typedef struct {
   BalmStringView* url;
   BalmStringView* query;
 
-  BalmStringNode* headers;
-  BalmStringViewNode* values;
+  BalmStringNode* recv_headers;
+  BalmStringViewNode* recv_values;
+
+  BalmStringNode* proc_headers;
+  BalmStringNode* proc_values;
 
   struct {
     char conlen[43];
@@ -232,8 +235,8 @@ static PyObject* normalize_header(BalmString* header) {
 }
 
 static void push_headers(PyObject* dict, Request* req) {
-  BalmStringNode* header = req->headers;
-  BalmStringViewNode* value = req->values;
+  BalmStringNode* header = req->proc_headers;
+  BalmStringViewNode* value = req->proc_values;
   PyDictObject* dict2 = (PyDictObject*) dict;
   while(header && value) {
     PyObject* norm = normalize_header(&header->str);
@@ -360,35 +363,41 @@ static int on_url(llhttp_t* parser, const char* at, size_t length) {
   return 0;
 }
 
+static int on_url_complete(llhttp_t* parser) {
+  GET_PARSER_REQUEST(parser)->settings.on_url = on_url;
+  return 0;
+}
+
 static int on_header_field_next(llhttp_t* parser, const char*, size_t length) {
   Request* req = GET_PARSER_REQUEST(parser);
-  req->headers->str._base.utf8_length += length;
-  req->headers->str._base._base.length += length;
+  req->recv_headers->str._base.utf8_length += length;
+  req->recv_headers->str._base._base.length += length;
   return 0;
 }
 
 static int on_header_field(llhttp_t* parser, const char* at, size_t length) {
   Request* req = GET_PARSER_REQUEST(parser);
 
-  BalmStringNode* prev = req->headers;
-  req->headers = (BalmStringNode*) New_BalmString((char*) at, length);
-  req->headers->next = prev;
+  BalmStringNode* prev = req->recv_headers;
+  req->recv_headers = (BalmStringNode*) New_BalmString((char*) at, length);
+  req->recv_headers->next = prev;
   req->settings.on_header_field = on_header_field_next;
   return 0;
 }
 
 static int on_header_value_next(llhttp_t* parser, const char*, size_t length) {
   Request* req = GET_PARSER_REQUEST(parser);
-  req->values->str._base.utf8_length += length;
-  req->values->str._base._base.length += length;
+  req->recv_values->str._base.utf8_length += length;
+  req->recv_values->str._base._base.length += length;
   return 0;
 }
 
 static int on_header_value(llhttp_t* parser, const char* at, size_t length) {
   Request* req = GET_PARSER_REQUEST(parser);
-  BalmStringViewNode* prev = req->values;
-  req->values = (BalmStringViewNode*) New_BalmStringView((char*) at, length);
-  req->values->next = prev;
+  BalmStringViewNode* prev = req->recv_values;
+  req->recv_values =
+      (BalmStringViewNode*) New_BalmStringView((char*) at, length);
+  req->recv_values->next = prev;
   req->settings.on_header_value = on_header_value_next;
   return 0;
 }
@@ -561,7 +570,6 @@ static void happy_write_cb(uv_write_t* write, int /*status*/) {
   if(!req->state.processing && req->state.keepalive) {
     req->send.used = 0;
     req->resp.status = NULL;
-    req->settings.on_url = on_url;
 
     req->state.sending = false;
     if(req->state.received)
@@ -592,6 +600,10 @@ static void start_response_worker_cb(uv_work_t* thread, int /*status*/) {
 }
 
 static void start_processing(Request* req) {
+  req->proc_headers = req->recv_headers;
+  req->proc_values = req->recv_values;
+  req->recv_headers = NULL;
+  req->recv_values = NULL;
   req->state.processing = true;
   uv_queue_work(uv_default_loop(), &req->thread, start_response_worker,
       start_response_worker_cb);
@@ -608,6 +620,7 @@ static int on_message_complete(llhttp_t* parser) {
 
 static llhttp_settings_t init_settings = {
     .on_url = on_url,
+    .on_url_complete = on_url_complete,
     .on_header_field = on_header_field,
     .on_header_value = on_header_value,
     .on_header_value_complete = on_header_value_complete,
@@ -689,7 +702,8 @@ static void resume_recv(Request* req) {
 
   llhttp_resume(&req->parser);
   uv_read_start((uv_stream_t*) req, alloc_buffer, on_read);
-  handle_parse(req);
+  if(req->used)
+    handle_parse(req);
 }
 
 static void handle_parse(Request* req) {
