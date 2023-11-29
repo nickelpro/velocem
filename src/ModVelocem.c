@@ -4,6 +4,7 @@
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 
+#include "GILBalm/Balm.h"
 #include "Velocem.h"
 
 static PyObject* run(PyObject* self, PyObject* const* args, Py_ssize_t nargs,

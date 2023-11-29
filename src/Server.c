@@ -13,6 +13,7 @@
 #include "Intellisense.h"
 
 #include "constants.h"
+#include "GILBalm/Balm.h"
 #include "util.h"
 
 // Get the actual fuck out of here with this shit MSVC
@@ -56,19 +57,6 @@ static const char _cHTTP_rnrn[] = "\r\n\r\n";
 static const char _cHTTP_colon[] = ": ";
 static const char _cHTTP_500[] = "HTTP/1.1 500 Internal Server Error\r\n\r\n";
 
-typedef struct {
-  size_t len;
-  const char* base;
-} StrView;
-
-#define VIEW2PY(v) PyUnicode_FromStringAndSize((v).base, (v).len)
-#define PyDict_SetView(dict, key, view)                                        \
-  do {                                                                         \
-    PyObject* v = VIEW2PY(view);                                               \
-    PyDict_SetItem(dict, key, v);                                              \
-    Py_DECREF(v);                                                              \
-  } while(0)
-
 #define BUFFER_STR_SIZE(buf, str, size)                                        \
   do {                                                                         \
     uv_buf_t* b = (buf);                                                       \
@@ -82,11 +70,6 @@ typedef struct {
   BUFFER_STR_SIZE(buf, PyBytes_AsString(pyobj), PyBytes_GET_SIZE(pyobj))
 
 typedef struct {
-  StrView field;
-  StrView value;
-} HTTPHeader;
-
-typedef struct {
   uv_tcp_t server;
   PyObject* app;
   PyObject* base_environ;
@@ -97,6 +80,7 @@ typedef struct {
 
   uv_write_t write;
   enum {
+    WRITE_NONE,
     WRITE_LIST,
     WRITE_ITER,
   } write_status;
@@ -116,15 +100,11 @@ typedef struct {
   llhttp_t parser;
   llhttp_settings_t settings;
 
-  StrView method;
-  StrView url;
-  StrView query;
+  BalmStringView* url;
+  BalmStringView* query;
 
-  struct {
-    size_t len;
-    size_t used;
-    HTTPHeader* fvs;
-  } headers;
+  BalmStringNode* headers;
+  BalmStringViewNode* values;
 
   struct {
     char conlen[43];
@@ -225,33 +205,48 @@ static PyMethodDef _START_RESPONSE_DEF = {
 };
 
 
-static PyObject* create_header_string(StrView field) {
-  PyObject* str = PyUnicode_New(field.len + 5, 127);
-  Py_UCS1* buf = PyUnicode_1BYTE_DATA(str);
-  memcpy(buf, "HTTP_", 5);
-  buf += 5;
-  for(size_t i = 0; i < field.len; ++i) {
+static PyObject* normalize_header(BalmString* header) {
+  size_t old_len = GetLen_BalmString(header);
+
+  size_t new_len = old_len + 5;
+  char* new_str = malloc(new_len + 1);
+
+  char* old_str = SwapBuffer_BalmString(header, new_str, new_len, NULL);
+
+  char* target = new_str + 5;
+  for(size_t i = 0; i < old_len; ++i) {
     // CVE-2015-0219
     // https://www.djangoproject.com/weblog/2015/jan/13/security/
-    if(field.base[i] == '_') {
-      Py_DECREF(str);
+    if(old_str[i] == '_') {
       return NULL;
-    } else if(field.base[i] == '-') {
-      buf[i] = '_';
+    } else if(old_str[i] == '-') {
+      target[i] = '_';
     } else {
-      buf[i] = field.base[i] & 0xDF;
+      target[i] = old_str[i] & 0xDF;
     }
   }
-  return str;
+
+  memcpy(new_str, "HTTP_", 5);
+  new_str[new_len] = 0;
+  return (PyObject*) header;
 }
 
-static void push_headers(PyObject* dict, HTTPHeader* headers, size_t len) {
-  for(HTTPHeader* hdr = headers; hdr < headers + len; ++hdr) {
-    PyObject* k = create_header_string(hdr->field);
-    if(!k)
-      continue;
-    PyDict_SetView(dict, k, hdr->value);
-    Py_DECREF(k);
+static void push_headers(PyObject* dict, Request* req) {
+  BalmStringNode* header = req->headers;
+  BalmStringViewNode* value = req->values;
+  PyDictObject* dict2 = (PyDictObject*) dict;
+  while(header && value) {
+    PyObject* norm = normalize_header(&header->str);
+    if(norm) {
+      PyDict_SetItem(dict, norm, (PyObject*) value);
+      header = header->next;
+      value = value->next;
+    } else {
+      header = header->next;
+      value = value->next;
+      _Py_Dealloc((PyObject*) header);
+      _Py_Dealloc((PyObject*) value);
+    }
   }
 }
 
@@ -300,22 +295,26 @@ static PyObject* build_environ(Request* req) {
   PyDict_SetItem(environ, _REQUEST_METHOD,
       (PyObject*) &HTTP_METHS[req->parser.method]);
 
-  // Casting away const here so some explanation is in order:
-  // This is the buffer from alloc_request, it's perfectly fine to modify in
-  // place. The pointers are const because we grabbed them during parsing,
-  // llhttp very reasonably treats the buffers as const, and generally it's a
-  // good idea to treat these StrViews as const.
-  //
-  // But we're going to be deallocating the whole request in a little bit, so
-  // let's just do the modifications we need in place.
-  req->url.len = unquote_url_inplace((char*) req->url.base, req->url.len);
-  req->query.len = unquote_url_inplace((char*) req->query.base, req->query.len);
-  PyDict_SetView(environ, _PATH_INFO, req->url);
-  PyDict_SetView(environ, _QUERY_STRING, req->query);
+  char* url = GetData_BalmStringView(req->url);
+  size_t url_len = GetLen_BalmStringView(req->url);
+  url_len = unquote_url_inplace(url, url_len);
+  UpdateLen_BalmString(req->url, url_len);
+
+  if(req->query) {
+    char* query = GetData_BalmStringView(req->query);
+    size_t query_len = GetLen_BalmStringView(req->query);
+    query_len = unquote_url_inplace(query, query_len);
+    UpdateLen_BalmString(req->query, query_len);
+    PyDict_SetItem(environ, _QUERY_STRING, (PyObject*) req->query);
+  } else {
+    PyDict_SetItem(environ, _QUERY_STRING, _EMPTY_STRING);
+  }
+
+  PyDict_SetItem(environ, _PATH_INFO, (PyObject*) req->url);
   PyDict_SetItem(environ, _SERVER_PROTOCOL,
       req->parser.http_minor ? _HTTP_1_1 : _HTTP_1_0);
 
-  push_headers(environ, req->headers.fvs, req->headers.used);
+  push_headers(environ, req);
   replace_key(environ, _HTTP_CONTENT_LENGTH, _CONTENT_LENGTH);
   replace_key(environ, _HTTP_CONTENT_TYPE, _CONTENT_TYPE);
 
@@ -324,100 +323,78 @@ static PyObject* build_environ(Request* req) {
 
 static int on_query_next(llhttp_t* parser, const char*, size_t length) {
   Request* req = GET_PARSER_REQUEST(parser);
-  req->query.len += length;
+  req->query->_base.utf8_length += length;
+  req->query->_base._base.length += length;
   return 0;
 }
 
 static int on_url_next(llhttp_t* parser, const char* at, size_t length) {
   Request* req = GET_PARSER_REQUEST(parser);
-
   char* query = memchr(at, '?', length);
   if(query) {
-    req->url.len += query - at;
-    req->query.base = ++query;
-    req->query.len = length - (query - at);
+    size_t increment = query - at;
+    req->url->_base.utf8_length += increment;
+    req->url->_base._base.length += increment;
+    ++query;
+    req->query = New_BalmStringView(query, length - (query - at));
     req->settings.on_url = on_query_next;
   } else {
-    req->url.len += length;
+    req->url->_base.utf8_length += length;
+    req->url->_base._base.length += length;
   }
   return 0;
 }
 
 static int on_url(llhttp_t* parser, const char* at, size_t length) {
   Request* req = GET_PARSER_REQUEST(parser);
-
-  req->url.base = at;
-
   char* query = memchr(at, '?', length);
   if(query) {
-    req->url.len = (query - at);
-    req->query.base = ++query;
-    req->query.len = length - (query - at);
+    req->url = New_BalmStringView((char*) at, query - at);
+    ++query;
+    req->query = New_BalmStringView(query, length - (query - at));
     req->settings.on_url = on_query_next;
   } else {
-    req->url.len = length;
+    req->url = New_BalmStringView((char*) at, length);
     req->settings.on_url = on_url_next;
   }
   return 0;
 }
 
-static int on_method_next(llhttp_t* parser, const char*, size_t length) {
-  Request* req = GET_PARSER_REQUEST(parser);
-  req->method.len += length;
-  return 0;
-}
-
-static int on_method(llhttp_t* parser, const char* at, size_t length) {
-  Request* req = GET_PARSER_REQUEST(parser);
-  req->method.base = at;
-  req->method.len = length;
-  req->settings.on_method = on_method_next;
-  return 0;
-}
-
 static int on_header_field_next(llhttp_t* parser, const char*, size_t length) {
   Request* req = GET_PARSER_REQUEST(parser);
-  HTTPHeader* header = &req->headers.fvs[req->headers.used];
-  header->field.len += length;
+  req->headers->str._base.utf8_length += length;
+  req->headers->str._base._base.length += length;
   return 0;
 }
 
 static int on_header_field(llhttp_t* parser, const char* at, size_t length) {
   Request* req = GET_PARSER_REQUEST(parser);
 
-  if(req->headers.used == req->headers.len) {
-    req->headers.len <<= 1;
-    size_t alloc = req->headers.len * sizeof(*req->headers.fvs);
-    req->headers.fvs = realloc(req->headers.fvs, alloc);
-  }
-
-  HTTPHeader* header = &req->headers.fvs[req->headers.used];
-  header->field.base = at;
-  header->field.len = length;
-
+  BalmStringNode* prev = req->headers;
+  req->headers = (BalmStringNode*) New_BalmString((char*) at, length);
+  req->headers->next = prev;
   req->settings.on_header_field = on_header_field_next;
   return 0;
 }
 
 static int on_header_value_next(llhttp_t* parser, const char*, size_t length) {
   Request* req = GET_PARSER_REQUEST(parser);
-  HTTPHeader* header = &req->headers.fvs[req->headers.used];
-  header->value.len += length;
+  req->values->str._base.utf8_length += length;
+  req->values->str._base._base.length += length;
   return 0;
 }
 
 static int on_header_value(llhttp_t* parser, const char* at, size_t length) {
   Request* req = GET_PARSER_REQUEST(parser);
-  HTTPHeader* header = &req->headers.fvs[req->headers.used];
-  header->value.base = at;
-  header->value.len = length;
+  BalmStringViewNode* prev = req->values;
+  req->values = (BalmStringViewNode*) New_BalmStringView((char*) at, length);
+  req->values->next = prev;
   req->settings.on_header_value = on_header_value_next;
   return 0;
 }
 
 static int on_header_value_complete(llhttp_t* parser) {
   Request* req = GET_PARSER_REQUEST(parser);
-  ++req->headers.used;
   req->settings.on_header_field = on_header_field;
   req->settings.on_header_value = on_header_value;
   return 0;
@@ -425,7 +402,6 @@ static int on_header_value_complete(llhttp_t* parser) {
 
 
 static void free_request(Request* req) {
-  free(req->headers.fvs);
   free(req->send.bufs);
   if(req->resp.status) {
     PyGILState_STATE state = PyGILState_Ensure();
@@ -586,7 +562,6 @@ static void happy_write_cb(uv_write_t* write, int /*status*/) {
     req->send.used = 0;
     req->resp.status = NULL;
     req->settings.on_url = on_url;
-    req->settings.on_method = on_method;
 
     req->state.sending = false;
     if(req->state.received)
@@ -632,7 +607,6 @@ static int on_message_complete(llhttp_t* parser) {
 }
 
 static llhttp_settings_t init_settings = {
-    .on_method = on_method,
     .on_url = on_url,
     .on_header_field = on_header_field,
     .on_header_value = on_header_value,
@@ -652,12 +626,9 @@ static Request* alloc_request(Server* srv, size_t buf_size, size_t hdr_count,
   req->settings = init_settings;
   llhttp_init(&req->parser, HTTP_REQUEST, &req->settings);
 
-  req->headers.fvs = malloc(sizeof(*req->headers.fvs) * hdr_count);
-  req->headers.len = hdr_count;
-  req->headers.used = 0;
-
   req->resp.status = NULL;
   req->resp.headers = NULL;
+  req->write_status = WRITE_NONE;
 
   size_t sz = sizeof(*req->send.bufs) * send_count;
   req->send.bufs = malloc(sz);
@@ -665,9 +636,8 @@ static Request* alloc_request(Server* srv, size_t buf_size, size_t hdr_count,
   req->send.len = send_count;
   req->send.used = 0;
 
-  req->method.len = 0;
-  req->url.len = 0;
-  req->query.len = 0;
+  req->url = NULL;
+  req->query = NULL;
 
   req->parse_idx = 0;
   req->len = buf_size;
@@ -704,7 +674,6 @@ static void on_read(uv_stream_t* client, ssize_t nRead, const uv_buf_t* buf) {
 }
 
 static void resume_recv(Request* req) {
-  req->headers.used = 0;
   req->parse_idx = 0;
 
   const char* endp = llhttp_get_error_pos(&req->parser);
@@ -753,6 +722,7 @@ Py_LOCAL_SYMBOL void init() {
 #undef X
 
   init_constants();
+  balm_init();
 
   _HTTP_1_0 = PyUnicode_FromString("HTTP/1.0");
   _HTTP_1_1 = PyUnicode_FromString("HTTP/1.1");
