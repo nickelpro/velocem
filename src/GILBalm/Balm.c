@@ -1,9 +1,8 @@
-#include "threads.h"
-
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 
 #include "Balm.h"
+#include "balm_threads.h"
 
 static PyTypeObject BalmStringView_Type;
 static PyTypeObject BalmString_Type;
@@ -37,7 +36,7 @@ static void balmstr_init(BalmStringNode* str, BalmStringNode* next) {
 BalmStringNode* balmstr_block_alloc(size_t len) {
   BalmStringNode* base = malloc(sizeof(*base) * len);
   BalmStringNode* prev = NULL;
-  for(auto v = base; v < base + len; ++v) {
+  for(BalmStringNode* v = base; v < base + len; ++v) {
     balmstr_init(v, prev);
     prev = v;
   }
