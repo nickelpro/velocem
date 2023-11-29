@@ -419,11 +419,14 @@ static void free_request(Request* req) {
       Py_DECREF(req->write.data);
     PyGILState_Release(state);
   }
-  free(req);
 }
 
 static void free_request_worker(uv_work_t* thread) {
   free_request(GET_THREAD_REQUEST(thread));
+}
+
+static void free_request_cb(uv_work_t* thread, int /*status*/) {
+  free(GET_THREAD_REQUEST(thread));
 }
 
 
@@ -431,7 +434,8 @@ static void on_close(uv_handle_t* handle) {
   Request* req = (Request*) handle;
 
   // We might need to acquire the GIL, so do this in a thread
-  uv_queue_work(uv_default_loop(), &req->thread, free_request_worker, NULL);
+  uv_queue_work(uv_default_loop(), &req->thread, free_request_worker,
+      free_request_cb);
 }
 
 static uv_buf_t* get_buf(Request* req) {
@@ -641,6 +645,9 @@ static Request* alloc_request(Server* srv, size_t buf_size, size_t hdr_count,
   req->resp.status = NULL;
   req->resp.headers = NULL;
   req->write_status = WRITE_NONE;
+
+  req->recv_headers = NULL;
+  req->recv_values = NULL;
 
   size_t sz = sizeof(*req->send.bufs) * send_count;
   req->send.bufs = malloc(sz);
