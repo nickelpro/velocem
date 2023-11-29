@@ -237,7 +237,6 @@ static PyObject* normalize_header(BalmString* header) {
 static void push_headers(PyObject* dict, Request* req) {
   BalmStringNode* header = req->proc_headers;
   BalmStringViewNode* value = req->proc_values;
-  PyDictObject* dict2 = (PyDictObject*) dict;
   while(header && value) {
     PyObject* norm = normalize_header(&header->str);
     if(norm) {

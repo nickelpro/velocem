@@ -13,7 +13,7 @@ HttpMeth HTTP_METHS[HTTP_METH_MAX] = {
       ._base = {                                                               \
           .ob_base = {                                                         \
               .ob_refcnt = _Py_IMMORTAL_REFCNT,                                \
-              .ob_type = &PyUnicode_Type,                                      \
+              .ob_type = NULL,                                                 \
           },                                                                   \
           .length = STRSZ(#name),                                              \
           .hash = -1,                                                          \
@@ -31,6 +31,8 @@ HttpMeth HTTP_METHS[HTTP_METH_MAX] = {
 // clang-format on
 
 void init_constants() {
-  for(HttpMeth* meth = HTTP_METHS; meth < HTTP_METHS + HTTP_METH_MAX; ++meth)
-    meth->_base.hash = PyUnicode_Type.tp_hash((PyObject*) meth);
+  for(HttpMeth* meth = HTTP_METHS; meth < HTTP_METHS + HTTP_METH_MAX; ++meth) {
+    meth->_base.ob_base.ob_type = &PyUnicode_Type;
+    meth->_base.hash = PyObject_Hash((PyObject*) meth);
+  }
 }
