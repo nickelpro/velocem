@@ -3,7 +3,7 @@ name = "velocem"
 version = "0.0.2"
 description = "Hyperspeed Python Web Framework"
 readme = "ReadMe.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 license = { "file" = "UsageLicense" }
 authors = [{ "name" = "Vito Gamberini", "email" = "vito@gamberini.email" }]
 keywords = ["WSGI"]
@@ -11,7 +11,6 @@ classifiers = [
   "Development Status :: 2 - Pre-Alpha",
   "License :: OSI Approved :: zlib/libpng License",
   "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Operating System :: POSIX :: Linux",
   "Operating System :: Microsoft :: Windows",

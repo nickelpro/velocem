@@ -24,7 +24,7 @@ endif()
 
 project(velocem LANGUAGES C VERSION 0.0.2)
 
-find_package(Python3 REQUIRED COMPONENTS Development.Module)
+find_package(Python3 3.12 REQUIRED COMPONENTS Development.Module)
 find_package(libuv CONFIG REQUIRED)
 find_package(llhttp CONFIG REQUIRED)
 

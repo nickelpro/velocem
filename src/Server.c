@@ -12,6 +12,9 @@
 // Until EDG learns what a bool is
 #include "Intellisense.h"
 
+#include "constants.h"
+#include "util.h"
+
 // Get the actual fuck out of here with this shit MSVC
 #ifdef environ
 #undef environ
@@ -72,7 +75,6 @@ typedef struct {
     b->base = (char*) (str);                                                   \
     b->len = (size);                                                           \
   } while(0)
-#define STRSZ(str) (sizeof(str) - 1)
 #define BUFFER_STR(buf, str) BUFFER_STR_SIZE(buf, str, STRSZ(str))
 #define BUFFER_PYSTR(buf, pyobj)                                               \
   BUFFER_STR_SIZE(buf, PyUnicode_DATA(pyobj), PyUnicode_GET_LENGTH(pyobj))
@@ -295,14 +297,8 @@ size_t unquote_url_inplace(char* url, size_t len) {
 static PyObject* build_environ(Request* req) {
   PyObject* environ = PyDict_Copy(req->base_environ);
 
-  // If Bjoern's single cute micro-optimization is good, more is better
-  switch(req->parser.method) { // clang-format off
-    case HTTP_GET:    PyDict_SetItem(environ, _REQUEST_METHOD, _GET);    break;
-    case HTTP_POST:   PyDict_SetItem(environ, _REQUEST_METHOD, _POST);   break;
-    case HTTP_PUT:    PyDict_SetItem(environ, _REQUEST_METHOD, _PUT);    break;
-    case HTTP_DELETE: PyDict_SetItem(environ, _REQUEST_METHOD, _DELETE); break;
-    default:          PyDict_SetView(environ, _REQUEST_METHOD, req->method);
-  } // clang-format on
+  PyDict_SetItem(environ, _REQUEST_METHOD,
+      (PyObject*) &HTTP_METHS[req->parser.method]);
 
   // Casting away const here so some explanation is in order:
   // This is the buffer from alloc_request, it's perfectly fine to modify in
@@ -755,6 +751,8 @@ Py_LOCAL_SYMBOL void init() {
 #define X(str) _##str = PyUnicode_FromString(#str);
   COMMON_STRINGS(X)
 #undef X
+
+  init_constants();
 
   _HTTP_1_0 = PyUnicode_FromString("HTTP/1.0");
   _HTTP_1_1 = PyUnicode_FromString("HTTP/1.1");

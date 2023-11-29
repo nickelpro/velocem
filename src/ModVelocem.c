@@ -9,7 +9,11 @@
 static PyObject* run(PyObject* self, PyObject* const* args, Py_ssize_t nargs,
     PyObject* kwnames) {
   static const char* _keywords[] = {"", "host", "port", "listen_backlog", NULL};
-  static _PyArg_Parser _parser = {.keywords = _keywords, .format = "O|sII:run"};
+  static _PyArg_Parser _parser = {
+      .initialized = 0,
+      .keywords = _keywords,
+      .format = "O|sII:run",
+  };
 
   PyObject* app;
   char* host = "127.0.0.1";
