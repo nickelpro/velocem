@@ -22,7 +22,7 @@ if(DEFINED VCPKG_ROOT_DIR)
   )
 endif()
 
-project(velocem LANGUAGES C VERSION 0.0.2)
+project(velocem LANGUAGES C VERSION 0.0.3)
 
 find_package(Python3 3.12 REQUIRED COMPONENTS Development.Module)
 find_package(libuv CONFIG REQUIRED)
