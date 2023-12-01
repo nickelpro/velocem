@@ -1,133 +1,133 @@
+#include <stdio.h>
+
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 
 #include "Balm.h"
 #include "balm_threads.h"
 
-static PyTypeObject BalmStringView_Type;
-static PyTypeObject BalmString_Type;
+#include "util.h"
 
-static struct {
+static PyTypeObject BalmStringView_Type;
+static PyTypeObject BalmStringCompact_Type;
+static PyTypeObject BalmStringBig_Type;
+
+typedef struct {
   mtx_t lock;
   BalmStringNode* head;
-} strList;
+} StrPool;
 
-static void balmstr_init(BalmStringNode* str, BalmStringNode* next) {
-  // clang-format off
-  *str = (BalmStringNode) {
-      .next = next,
-      .str = {
-          ._base = {
-              ._base = {
-                  .hash = -1,
-                  .state = {
-                      .interned = 0,
-                      .kind = PyUnicode_1BYTE_KIND,
-                      .compact = 0,
-                      .ascii = 1,
-                  },
-              },
-          },
-      }
-  };
-  // clang-format on
+static struct {
+  size_t outstanding;
+  StrPool bigviews;
+  StrPool compacts;
+} str_pools;
+
+BalmStringNode* compactbalmstr_block_alloc(size_t len) {
+  size_t sz = BALM_COMPACT_ALLOCATION * len;
+  BalmStringNode* base = malloc(sz);
+  char* cur = (char*) base;
+  char* end = cur + sz;
+  BalmStringNode* prev = NULL;
+
+  for(BalmStringNode* v = base; cur < end;
+      v = (BalmStringNode*) (cur += BALM_COMPACT_ALLOCATION)) {
+    v->next = prev;
+    prev = v;
+    // clang-format off
+    v->str = (BalmString) {
+        .ob_base.ob_type = &BalmStringCompact_Type,
+        .state = {
+            .kind = PyUnicode_1BYTE_KIND,
+            .compact = 1,
+            .ascii = 1,
+            .balm = BALM_STRING_COMPACT,
+        },
+    };
+    // clang-format on
+  }
+
+  return prev;
 }
 
 BalmStringNode* balmstr_block_alloc(size_t len) {
   BalmStringNode* base = malloc(sizeof(*base) * len);
   BalmStringNode* prev = NULL;
   for(BalmStringNode* v = base; v < base + len; ++v) {
-    balmstr_init(v, prev);
+    v->next = prev;
     prev = v;
+    v->str = (BalmString) {.state = {.kind = PyUnicode_1BYTE_KIND, .ascii = 1}};
   }
-  return &base[len - 1];
+  return prev;
 }
 
-static void balmstr_push(PyObject* str) {
-  BalmStringNode* node = (BalmStringNode*) str;
-  mtx_lock(&strList.lock);
-  node->next = strList.head;
-  strList.head = node;
-  mtx_unlock(&strList.lock);
+static void balmstr_push(StrPool* pool, PyObject* str) {
+  BalmStringNode* node = GET_NODE_PYOBJ(str);
+  mtx_lock(&pool->lock);
+  node->next = pool->head;
+  pool->head = node;
+  mtx_unlock(&pool->lock);
 }
 
-static BalmString* balmstr_pop() {
-  mtx_lock(&strList.lock);
-  if(!strList.head)
-    strList.head = balmstr_block_alloc(BALM_STRING_ALLOCATION_BLOCK_SIZE);
-  BalmStringNode* node = strList.head;
-  strList.head = node->next;
-  mtx_unlock(&strList.lock);
+static BalmString* balmstr_pop(StrPool* pool, BalmStringNode* (*alloc)(size_t),
+    size_t alloc_len) {
+  mtx_lock(&pool->lock);
+  if(!pool->head)
+    pool->head = alloc(alloc_len);
+  BalmStringNode* node = pool->head;
+  pool->head = node->next;
+  mtx_unlock(&pool->lock);
   return &node->str;
 }
 
 static void balmstrview_dealloc(PyObject* str) {
-  balmstr_push(str);
+  balmstr_push(&str_pools.bigviews, str);
 }
 
-static void balmstr_dealloc(PyObject* str) {
-  free(((BalmString*) str)->_base.utf8);
-  balmstr_push(str);
+static void balmstrbig_dealloc(PyObject* str) {
+  free(((BalmString*) str)->uc.data.any);
+  balmstr_push(&str_pools.bigviews, str);
 }
 
-static BalmString* new_balmstring(char* data, size_t len) {
-  BalmString* str = balmstr_pop();
-  str->_base._base.hash = -1;
-  str->_base._base.length = len;
-  str->_base.utf8_length = len;
-  str->_base.utf8 = data;
-  str->data.any = data;
-  str->_base._base.ob_base.ob_refcnt = 0;
+static void balmstrcompact_dealloc(PyObject* str) {
+  balmstr_push(&str_pools.compacts, str);
+}
+
+Py_LOCAL_SYMBOL BalmString* New_BalmString(size_t len) {
+  BalmString* str;
+  if(len > BALM_COMPACT_MAX_STR) {
+    BalmString* str = balmstr_pop(&str_pools.bigviews, balmstr_block_alloc,
+        BALM_STRING_ALLOCATION_BLOCK_SIZE);
+    str->ob_base.ob_type = &BalmStringBig_Type;
+    str->uc.data.any = malloc(len);
+    str->uc._base.utf8 = str->uc.data.any;
+    str->uc._base.utf8_length = len;
+    str->length = len;
+    str->state.balm = BALM_STRING_BIG;
+  } else {
+    str = balmstr_pop(&str_pools.compacts, compactbalmstr_block_alloc,
+        BALM_STRING_ALLOCATION_BLOCK_SIZE);
+    str->length = len;
+  }
   return str;
 }
 
-Py_LOCAL_SYMBOL BalmString* New_BalmString(char* data, size_t len) {
-  BalmString* str = new_balmstring(data, len);
-  str->_base._base.ob_base.ob_type = &BalmString_Type;
+Py_LOCAL_SYMBOL BalmString* New_BalmStringView(char* data, size_t len) {
+  BalmString* str = balmstr_pop(&str_pools.bigviews, balmstr_block_alloc,
+      BALM_STRING_ALLOCATION_BLOCK_SIZE);
+  str->ob_base.ob_type = &BalmStringView_Type;
+  str->uc.data.any = data;
+  str->uc._base.utf8 = data;
+  str->uc._base.utf8_length = len;
+  str->length = len;
+  str->state.balm = BALM_STRING_VIEW;
   return str;
-}
-
-Py_LOCAL_SYMBOL BalmStringView* New_BalmStringView(char* data, size_t len) {
-  BalmString* str = new_balmstring(data, len);
-  str->_base._base.ob_base.ob_type = &BalmStringView_Type;
-  return str;
-}
-
-Py_LOCAL_SYMBOL Py_ssize_t GetLen_BalmString(BalmString* str) {
-  return str->_base.utf8_length;
-}
-
-Py_LOCAL_SYMBOL Py_ssize_t GetLen_BalmStringView(BalmStringView* str) {
-  return str->_base.utf8_length;
 }
 
 Py_LOCAL_SYMBOL char* GetData_BalmString(BalmString* str) {
-  return str->_base.utf8;
-}
-
-Py_LOCAL_SYMBOL char* GetData_BalmStringView(BalmStringView* str) {
-  return str->_base.utf8;
-}
-
-Py_LOCAL_SYMBOL void UpdateLen_BalmString(BalmString* str, size_t len) {
-  str->_base._base.length = len;
-  str->_base.utf8_length = len;
-}
-
-Py_LOCAL_SYMBOL void UpdateLen_BalmStringView(BalmStringView* str, size_t len) {
-  str->_base._base.length = len;
-  str->_base.utf8_length = len;
-}
-
-Py_LOCAL_SYMBOL char* SwapBuffer_BalmString(BalmString* str, char* data,
-    size_t len, size_t* old_len) {
-  char* old = str->_base.utf8;
-  str->_base.utf8 = data;
-  str->data.any = data;
-  if(old_len)
-    *old_len = str->_base.utf8_length;
-  UpdateLen_BalmString(str, len);
-  return old;
+  if(str->state.balm == BALM_STRING_COMPACT)
+    return str->data;
+  return str->uc.data.any;
 }
 
 static PyTypeObject BalmDict_Type;
@@ -151,13 +151,21 @@ static void balmdict_init(BalmDictNode* dict, BalmDictNode* next) {
 
 static void balmdict_dealloc(PyObject* dict) {}
 
-Py_LOCAL_SYMBOL void balm_init() {
-  BalmString_Type = PyUnicode_Type;
-  BalmString_Type.tp_new = 0;
-  BalmString_Type.tp_free = 0;
-  BalmString_Type.tp_dealloc = balmstr_dealloc;
+static void init_strpool(StrPool* pool, BalmStringNode* (*alloc)(size_t)) {
+  mtx_init(&pool->lock, mtx_plain);
+  pool->head = alloc(BALM_STRING_ALLOCATION_BLOCK_SIZE);
+}
 
-  BalmStringView_Type = BalmString_Type;
+Py_LOCAL_SYMBOL void balm_init() {
+  BalmStringBig_Type = PyUnicode_Type;
+  BalmStringBig_Type.tp_new = 0;
+  BalmStringBig_Type.tp_free = 0;
+  BalmStringBig_Type.tp_dealloc = balmstrbig_dealloc;
+
+  BalmStringCompact_Type = BalmStringBig_Type;
+  BalmStringCompact_Type.tp_dealloc = balmstrcompact_dealloc;
+
+  BalmStringView_Type = BalmStringBig_Type;
   BalmStringView_Type.tp_dealloc = balmstrview_dealloc;
 
   BalmDict_Type = PyDict_Type;
@@ -165,6 +173,6 @@ Py_LOCAL_SYMBOL void balm_init() {
   BalmDict_Type.tp_free = 0;
   BalmDict_Type.tp_dealloc = balmdict_dealloc;
 
-  mtx_init(&strList.lock, mtx_plain);
-  strList.head = balmstr_block_alloc(BALM_STRING_ALLOCATION_BLOCK_SIZE);
+  init_strpool(&str_pools.bigviews, balmstr_block_alloc);
+  init_strpool(&str_pools.compacts, compactbalmstr_block_alloc);
 }
