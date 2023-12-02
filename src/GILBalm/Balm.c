@@ -18,7 +18,6 @@ typedef struct {
 } StrPool;
 
 static struct {
-  size_t outstanding;
   StrPool bigviews;
   StrPool compacts;
 } str_pools;
@@ -104,12 +103,14 @@ Py_LOCAL_SYMBOL BalmString* New_BalmString(size_t len) {
     str->uc._base.utf8_length = len;
     str->length = len;
     str->state.balm = BALM_STRING_BIG;
+    return str;
   } else {
     str = balmstr_pop(&str_pools.compacts, compactbalmstr_block_alloc,
         BALM_STRING_ALLOCATION_BLOCK_SIZE);
     str->length = len;
+    return str;
   }
-  return str;
+  return NULL;
 }
 
 Py_LOCAL_SYMBOL BalmString* New_BalmStringView(char* data, size_t len) {

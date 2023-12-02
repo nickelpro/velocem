@@ -21,9 +21,9 @@
 #undef environ
 #endif
 
+#define DEFAULT_REQ_POOL_BLOCK 5
 #define DEFAULT_BUF_SIZE (1 << 16)
-#define DEFAULT_HEADER_COUNT (1 << 5)
-#define DEFAULT_SEND_BUFFERS (DEFAULT_HEADER_COUNT * 4 + (1 << 3))
+#define DEFAULT_SEND_BUFFERS ((1 << 7) + (1 << 3))
 
 static PyObject* _GLOBAL_ENVIRON;
 
@@ -80,7 +80,7 @@ typedef struct {
   BalmStringNode* values;
 } Headers;
 
-typedef struct {
+typedef struct Request {
   uv_tcp_t client;
 
   uv_write_t write;
@@ -98,6 +98,9 @@ typedef struct {
     bool processing : 1;
     bool sending : 1;
   } state;
+  size_t inflight;
+
+  struct Request* next;
 
   PyObject* app;
   PyObject* base_environ;
@@ -133,6 +136,34 @@ typedef struct {
   size_t parse_idx;
   char buf[];
 } Request;
+
+static Request* req_pool;
+
+static Request* alloc_request(size_t buf_size, size_t send_count);
+
+static Request* alloc_req_block() {
+  Request* prev = NULL;
+  for(size_t i = 0; i < DEFAULT_REQ_POOL_BLOCK; ++i) {
+    Request* req = alloc_request(DEFAULT_BUF_SIZE, DEFAULT_SEND_BUFFERS);
+    req->next = prev;
+    prev = req;
+  }
+  return prev;
+}
+
+static Request* pop_req() {
+  if(!req_pool)
+    req_pool = alloc_req_block();
+
+  Request* req = req_pool;
+  req_pool = req->next;
+  return req;
+}
+
+void push_req(Request* req) {
+  req->next = req_pool;
+  req_pool = req;
+}
 
 #define GET_REQUEST_FROM_FIELD(pointer, field)                                 \
   GET_STRUCT_FROM_FIELD(pointer, Request, field)
@@ -418,33 +449,32 @@ static int on_header_value_complete(llhttp_t* parser) {
 }
 
 
-static void free_request(Request* req) {
-  free(req->send.bufs);
-  if(req->resp.status) {
-    PyGILState_STATE state = PyGILState_Ensure();
-    Py_DECREF(req->resp.status);
-    Py_DECREF(req->resp.headers);
-    if(req->write_status == WRITE_LIST)
-      Py_DECREF(req->write.data);
-    PyGILState_Release(state);
-  }
+static void clean_request(Request* req) {
+  PyGILState_STATE state = PyGILState_Ensure();
+  Py_DECREF(req->resp.status);
+  Py_DECREF(req->resp.headers);
+  if(req->write.data)
+    Py_DECREF(req->write.data);
+  PyGILState_Release(state);
 }
 
-static void free_request_worker(uv_work_t* thread) {
-  free_request(GET_THREAD_REQUEST(thread));
+static void push_request_worker(uv_work_t* thread) {
+  clean_request(GET_THREAD_REQUEST(thread));
 }
 
-static void free_request_cb(uv_work_t* thread, int /*status*/) {
-  free(GET_THREAD_REQUEST(thread));
+static void push_request_cb(uv_work_t* thread, int /*status*/) {
+  push_req(GET_THREAD_REQUEST(thread));
 }
 
 
 static void on_close(uv_handle_t* handle) {
   Request* req = (Request*) handle;
 
-  // We might need to acquire the GIL, so do this in a thread
-  uv_queue_work(uv_default_loop(), &req->thread, free_request_worker,
-      free_request_cb);
+  if(req->resp.status)
+    uv_queue_work(uv_default_loop(), &req->thread, push_request_worker,
+        push_request_cb);
+  else
+    push_req(req);
 }
 
 static uv_buf_t* get_buf(Request* req) {
@@ -489,6 +519,8 @@ static int handle_list(Request* req, PyObject* op) {
   }
 
   Py_INCREF(op);
+  if(req->write.data)
+    Py_DECREF(req->write.data);
   req->write.data = op;
   req->write_status = WRITE_LIST;
 
@@ -516,6 +548,9 @@ static int handle_tuple(Request* req, PyObject* op) {
   }
 
   Py_INCREF(op);
+  if(req->write.data)
+    Py_DECREF(req->write.data);
+
   req->write.data = op;
   req->write_status = WRITE_LIST;
 
@@ -579,13 +614,20 @@ static void start_processing(Request* req);
 
 static void happy_write_cb(uv_write_t* write, int /*status*/) {
   Request* req = GET_WRITE_REQUEST(write);
-  if(!req->state.processing && req->state.keepalive) {
-    req->send.used = 0;
-    req->resp.status = NULL;
 
-    req->state.sending = false;
-    if(req->state.received)
-      start_processing(req);
+  req->inflight--;
+  if(!req->state.processing) {
+    req->state.sending = !!req->inflight;
+
+    if(!req->state.sending) {
+      if(req->state.keepalive) {
+        req->send.used = 0;
+        if(req->state.received)
+          start_processing(req);
+      } else {
+        uv_close((uv_handle_t*) req, on_close);
+      }
+    }
   }
 }
 
@@ -607,6 +649,7 @@ static void start_response_worker_cb(uv_work_t* thread, int /*status*/) {
   if(req->state.keepalive)
     resume_recv(req);
 
+  req->inflight++;
   uv_write(&req->write, (uv_stream_t*) req, req->send.bufs, req->send.used,
       happy_write_cb);
 }
@@ -615,6 +658,7 @@ static void start_processing(Request* req) {
   req->proc = req->recv;
   req->recv = (Headers) {};
   req->state.processing = true;
+  req->inflight = 0;
   uv_queue_work(uv_default_loop(), &req->thread, start_response_worker,
       start_response_worker_cb);
 }
@@ -638,10 +682,15 @@ static llhttp_settings_t init_settings = {
     .on_message_complete = on_message_complete,
 };
 
-static Request* alloc_request(Server* srv, size_t buf_size, size_t hdr_count,
-    size_t send_count) {
+static Request* alloc_request(size_t buf_size, size_t send_count) {
   Request* req = malloc(sizeof(*req) + buf_size);
+  req->len = buf_size;
+  req->send.bufs = malloc(sizeof(*req->send.bufs) * send_count);
+  req->send.len = send_count;
+  return req;
+}
 
+static void init_request(Request* req, Server* srv) {
   memset(&req->state, 0, sizeof(req->state));
 
   req->app = srv->app;
@@ -650,26 +699,20 @@ static Request* alloc_request(Server* srv, size_t buf_size, size_t hdr_count,
   req->settings = init_settings;
   llhttp_init(&req->parser, HTTP_REQUEST, &req->settings);
 
+  req->recv = (Headers) {};
+
   req->resp.status = NULL;
   req->resp.headers = NULL;
   req->write_status = WRITE_NONE;
 
-  req->recv = (Headers) {};
-
-  size_t sz = sizeof(*req->send.bufs) * send_count;
-  req->send.bufs = malloc(sz);
-  memset(req->send.bufs, 0, sz);
-  req->send.len = send_count;
   req->send.used = 0;
+  req->write.data = NULL;
 
   req->url = NULL;
   req->query = NULL;
 
-  req->parse_idx = 0;
-  req->len = buf_size;
   req->used = 0;
-
-  return req;
+  req->parse_idx = 0;
 }
 
 static llhttp_errno_t exec_parse(Request* req) {
@@ -679,7 +722,7 @@ static llhttp_errno_t exec_parse(Request* req) {
   return err;
 }
 
-static void alloc_buffer(uv_handle_t* handle, size_t hint, uv_buf_t* buf) {
+static void alloc_buffer(uv_handle_t* handle, size_t, uv_buf_t* buf) {
   Request* req = (Request*) handle;
   buf->base = req->buf + req->used;
   buf->len = req->len - req->used;
@@ -687,7 +730,7 @@ static void alloc_buffer(uv_handle_t* handle, size_t hint, uv_buf_t* buf) {
 
 static void handle_parse(Request* req);
 
-static void on_read(uv_stream_t* client, ssize_t nRead, const uv_buf_t* buf) {
+static void on_read(uv_stream_t* client, ssize_t nRead, const uv_buf_t*) {
   if(nRead < 0) {
     uv_close((uv_handle_t*) client, on_close);
     return;
@@ -732,8 +775,8 @@ static void on_connect(uv_stream_t* handle, int status) {
   if(status < 0)
     return;
 
-  Request* req = alloc_request((Server*) handle, DEFAULT_BUF_SIZE,
-      DEFAULT_HEADER_COUNT, DEFAULT_SEND_BUFFERS);
+  Request* req = pop_req();
+  init_request(req, (Server*) handle);
 
   uv_tcp_init(uv_default_loop(), (uv_tcp_t*) req);
   if(!uv_accept(handle, (uv_stream_t*) req)) {
@@ -750,6 +793,7 @@ Py_LOCAL_SYMBOL void init() {
 
   init_constants();
   balm_init();
+  req_pool = alloc_req_block();
 
   _HTTP_1_0 = PyUnicode_FromString("HTTP/1.0");
   _HTTP_1_1 = PyUnicode_FromString("HTTP/1.1");
@@ -774,7 +818,7 @@ Py_LOCAL_SYMBOL void init() {
   PyDict_SetItemString(_GLOBAL_ENVIRON, "wsgi.run_once", Py_False);
 }
 
-static void handle_sigint(uv_signal_t* handle, int signum) {
+static void handle_sigint(uv_signal_t*, int) {
   PyErr_SetInterrupt();
   PyGILState_STATE state = PyGILState_Ensure();
   if(PyErr_CheckSignals() == -1) {

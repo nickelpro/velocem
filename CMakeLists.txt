@@ -40,6 +40,10 @@ else()
   target_compile_features(velocem PRIVATE c_std_23)
 endif()
 
+if(CMAKE_C_COMPILER_FRONTEND_VARIANT STREQUAL "GNU")
+  target_compile_options(velocem PRIVATE "-Wall")
+endif()
+
 add_subdirectory(src)
 
 install(
