@@ -518,7 +518,6 @@ static int handle_list(Request* req, PyObject* op) {
     return 0;
   }
 
-  Py_INCREF(op);
   if(req->write.data)
     Py_DECREF(req->write.data);
   req->write.data = op;
@@ -547,7 +546,6 @@ static int handle_tuple(Request* req, PyObject* op) {
     return 0;
   }
 
-  Py_INCREF(op);
   if(req->write.data)
     Py_DECREF(req->write.data);
 
@@ -593,7 +591,6 @@ static void start_response_worker(uv_work_t* thread) {
   PyObject* ret = PyObject_CallFunctionObjArgs(req->app, environ, sr, NULL);
   ((PyCFunctionObject*) sr)->m_self = NULL;
 
-  Py_XINCREF(ret);
   Py_DECREF(environ);
   Py_DECREF(sr);
 
