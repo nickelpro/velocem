@@ -15,19 +15,22 @@ typedef union {
   union {
     PyASCIIObject ascii;
     struct {
-      PyObject_HEAD;
-      Py_ssize_t length;
-      Py_hash_t hash;
+      // Force alignment on data[] to be correct
       struct {
-        unsigned int interned : 2;
-        unsigned int kind : 3;
-        unsigned int compact : 1;
-        unsigned int ascii : 1;
-        unsigned int _unused : 1; // Used to be a ready bit
-        // Balm state data, lives in unused padding bytes
-        unsigned int balm : 2;
-        unsigned int : 22;
-      } state;
+        PyObject_HEAD;
+        Py_ssize_t length;
+        Py_hash_t hash;
+        struct {
+          unsigned int interned : 2;
+          unsigned int kind : 3;
+          unsigned int compact : 1;
+          unsigned int ascii : 1;
+          unsigned int statically_allocated : 1;
+          // Balm state data, lives in unused padding bytes
+          unsigned int balm : 2;
+          unsigned int : 22;
+        } state;
+      };
       char data[];
     };
   };
