@@ -34,6 +34,9 @@ minimum_version = "3.17"
 build_type = "Release"
 build_args = ["-j"]
 
+[tool.py-build-cmake.mac.cmake.options]
+"CMAKE_OSX_DEPLOYMENT_TARGET:STRING" = "10.15"
+
 [tool.py-build-cmake.windows.cmake]
 args = ["-T", "ClangCL"]
 

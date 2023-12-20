@@ -22,8 +22,8 @@
 #endif
 
 #define DEFAULT_REQ_POOL_BLOCK 5
-#define DEFAULT_BUF_SIZE (1 << 16)
 #define DEFAULT_SEND_BUFFERS ((1 << 7) + (1 << 3))
+#define DEFAULT_HEADERS_SIZE (1 << 5)
 
 static PyObject* _GLOBAL_ENVIRON;
 
@@ -76,9 +76,25 @@ typedef struct {
 } Server;
 
 typedef struct {
-  BalmStringNode* fields;
-  BalmStringNode* values;
+  BalmString* field;
+  BalmString* value;
+} Header;
+
+typedef struct {
+  size_t len;
+  size_t used;
+  Header* base;
 } Headers;
+
+typedef struct {
+  BalmCompactStrBlock* blk;
+  size_t idx;
+} CompactStrNext;
+
+typedef struct {
+  BalmStrBlock* blk;
+  size_t idx;
+} StrViewNext;
 
 typedef struct Request {
   uv_tcp_t client;
@@ -108,6 +124,9 @@ typedef struct Request {
   llhttp_t parser;
   llhttp_settings_t settings;
 
+  StrViewNext str_views;
+  CompactStrNext str_comps;
+
   struct {
     char* base;
     size_t len;
@@ -131,20 +150,19 @@ typedef struct Request {
     uv_buf_t* bufs;
   } send;
 
-  size_t len;
-  size_t used;
   size_t parse_idx;
-  char buf[];
+  RefCountedData* proc_rd;
+  RefCountedData* rd;
 } Request;
 
 static Request* req_pool;
 
-static Request* alloc_request(size_t buf_size, size_t send_count);
+static Request* alloc_request(size_t send_count, size_t header_count);
 
 static Request* alloc_req_block() {
   Request* prev = NULL;
   for(size_t i = 0; i < DEFAULT_REQ_POOL_BLOCK; ++i) {
-    Request* req = alloc_request(DEFAULT_BUF_SIZE, DEFAULT_SEND_BUFFERS);
+    Request* req = alloc_request(DEFAULT_SEND_BUFFERS, DEFAULT_HEADERS_SIZE);
     req->next = prev;
     prev = req;
   }
@@ -163,6 +181,40 @@ static Request* pop_req() {
 void push_req(Request* req) {
   req->next = req_pool;
   req_pool = req;
+}
+
+BalmString* get_next_strview(Request* req, char* data, size_t len) {
+  if(!req->str_views.blk) {
+    req->str_views.blk = New_BalmStringBlock();
+    req->str_views.idx = 0;
+  } else if(req->str_views.idx == BALM_STRING_ALLOCATION_BLOCK_SIZE) {
+    req->str_views.blk->ref_count = BALM_STRING_ALLOCATION_BLOCK_SIZE;
+    req->rd += BALM_STRING_ALLOCATION_BLOCK_SIZE;
+    req->str_views.blk = New_BalmStringBlock();
+    req->str_views.idx = 0;
+  }
+  BalmString* str = Get_BalmStringFromBlock(req->str_views.blk,
+      req->str_views.idx, req->rd, data, len);
+  req->str_views.idx++;
+  return str;
+}
+
+BalmString* get_next_compstr(Request* req, size_t len) {
+  if(len > BALM_COMPACT_MAX_STR)
+    return New_BalmString(len);
+
+  if(!req->str_comps.blk) {
+    req->str_comps.blk = New_BalmCompactStringBlock();
+    req->str_comps.idx = 0;
+  } else if(req->str_comps.idx == BALM_STRING_ALLOCATION_BLOCK_SIZE) {
+    req->str_comps.blk->ref_count = BALM_STRING_ALLOCATION_BLOCK_SIZE;
+    req->str_comps.blk = New_BalmCompactStringBlock();
+    req->str_comps.idx = 0;
+  }
+  BalmString* str = Get_BalmCompactStringFromBlock(req->str_comps.blk,
+      req->str_comps.idx, len);
+  req->str_comps.idx++;
+  return str;
 }
 
 #define GET_REQUEST_FROM_FIELD(pointer, field)                                 \
@@ -246,8 +298,8 @@ static PyMethodDef _START_RESPONSE_DEF = {
 };
 
 
-static BalmString* normalize_field(char* base, size_t len) {
-  BalmString* str = New_BalmString(len + 5);
+static BalmString* normalize_field(Request* req, char* base, size_t len) {
+  BalmString* str = get_next_compstr(req, len);
   char* dst = GetData_BalmString(str);
 
   char* target = dst + 5;
@@ -255,7 +307,7 @@ static BalmString* normalize_field(char* base, size_t len) {
     // CVE-2015-0219
     // https://www.djangoproject.com/weblog/2015/jan/13/security/
     if(base[i] == '_') {
-      _Py_Dealloc((PyObject*) str);
+      req->str_comps.idx--;
       return NULL;
     } else if(base[i] == '-') {
       target[i] = '_';
@@ -268,13 +320,9 @@ static BalmString* normalize_field(char* base, size_t len) {
 }
 
 static void push_headers(PyObject* dict, Request* req) {
-  BalmStringNode* field = req->proc.fields;
-  BalmStringNode* value = req->proc.values;
-  while(field && value) {
-    PyDict_SetItem(dict, (PyObject*) &field->str, (PyObject*) &value->str);
-    field = field->next;
-    value = value->next;
-  }
+  Header* hds = req->proc.base;
+  for(size_t i = 0; i < req->proc.used; ++i)
+    PyDict_SetItem(dict, (PyObject*) hds[i].field, (PyObject*) hds[i].value);
 }
 
 static void replace_key(PyObject* dict, PyObject* old, PyObject* new) {
@@ -351,7 +399,7 @@ static int on_url_next(llhttp_t* parser, const char* at, size_t length) {
     req->url->length += increment;
     req->url->uc._base.utf8_length += increment;
     ++query;
-    req->query = New_BalmStringView(query, length - (query - at));
+    req->query = get_next_strview(req, query, length - (query - at));
     req->settings.on_url = on_query_next;
   } else {
     req->url->length += length;
@@ -364,12 +412,12 @@ static int on_url(llhttp_t* parser, const char* at, size_t length) {
   Request* req = GET_PARSER_REQUEST(parser);
   char* query = memchr(at, '?', length);
   if(query) {
-    req->url = New_BalmStringView((char*) at, query - at);
+    req->url = get_next_strview(req, (char*) at, query - at);
     ++query;
-    req->query = New_BalmStringView(query, length - (query - at));
+    req->query = get_next_strview(req, query, length - (query - at));
     req->settings.on_url = on_query_next;
   } else {
-    req->url = New_BalmStringView((char*) at, length);
+    req->url = get_next_strview(req, (char*) at, length);
     req->settings.on_url = on_url_next;
   }
   return 0;
@@ -408,35 +456,43 @@ static int on_header_field(llhttp_t* parser, const char* at, size_t length) {
   return 0;
 }
 
-#define PUSH_HEADER(list, val)                                                 \
-  do {                                                                         \
-    BalmStringNode* node = GET_NODE_PYOBJ(val);                                \
-    node->next = list;                                                         \
-    list = node;                                                               \
-  } while(0)
+static void push_header_field(Headers* hds, BalmString* field) {
+  if(hds->len == hds->used) {
+    hds->len *= 2;
+    hds->base = realloc(hds->base, sizeof(*hds->base) * hds->len);
+  }
+  hds->base[hds->used].field = field;
+}
+
+static void push_header_value(Headers* hds, BalmString* value) {
+  hds->base[hds->used].value = value;
+  hds->used++;
+}
 
 static int on_header_field_complete(llhttp_t* parser) {
   Request* req = GET_PARSER_REQUEST(parser);
-  BalmString* field = normalize_field(req->tmp_field.base, req->tmp_field.len);
+  BalmString* field =
+      normalize_field(req, req->tmp_field.base, req->tmp_field.len);
   if(!field)
     req->settings.on_header_value = NULL;
   else
-    PUSH_HEADER(req->recv.fields, field);
+    push_header_field(&req->recv, field);
   req->settings.on_header_field = on_header_field;
   return 0;
 }
 
 static int on_header_value_next(llhttp_t* parser, const char*, size_t length) {
   Request* req = GET_PARSER_REQUEST(parser);
-  req->recv.values->str.length += length;
-  req->recv.values->str.uc._base.utf8_length += length;
+  BalmString* val = req->recv.base[req->recv.used].value;
+  val->length += length;
+  val->uc._base.utf8_length += length;
   return 0;
 }
 
 static int on_header_value(llhttp_t* parser, const char* at, size_t length) {
   Request* req = GET_PARSER_REQUEST(parser);
-  BalmString* view = New_BalmStringView((char*) at, length);
-  PUSH_HEADER(req->recv.values, view);
+  BalmString* view = get_next_strview(req, (char*) at, length);
+  push_header_value(&req->recv, view);
   req->settings.on_header_value = on_header_value_next;
   return 0;
 }
@@ -447,7 +503,6 @@ static int on_header_value_complete(llhttp_t* parser) {
   req->settings.on_header_value = on_header_value;
   return 0;
 }
-
 
 static void clean_request(Request* req) {
   PyGILState_STATE state = PyGILState_Ensure();
@@ -465,7 +520,6 @@ static void push_request_worker(uv_work_t* thread) {
 static void push_request_cb(uv_work_t* thread, int /*status*/) {
   push_req(GET_THREAD_REQUEST(thread));
 }
-
 
 static void on_close(uv_handle_t* handle) {
   Request* req = (Request*) handle;
@@ -527,8 +581,12 @@ static int handle_list(Request* req, PyObject* op) {
   for(Py_ssize_t i = 0; i < sz; ++i)
     cl += PyBytes_GET_SIZE(PyList_GET_ITEM(op, i));
 
-  int len = sprintf(req->resp.conlen, "\r\nContent-Length: %zu\r\n\r\n", cl);
-  BUFFER_STR_SIZE(get_buf(req), req->resp.conlen, len);
+  char* cur = req->resp.conlen + STRSZ("\r\nContent-Length: ");
+  cur = velocem_itoa(cl, cur, req->resp.conlen + sizeof(req->resp.conlen));
+  memcpy(cur, "\r\n\r\n", 4);
+
+  size_t used = (cur - req->resp.conlen) + 4;
+  BUFFER_STR_SIZE(get_buf(req), req->resp.conlen, used);
 
   for(Py_ssize_t i = 0; i < sz; ++i)
     BUFFER_PYBYTES(get_buf(req), PyList_GET_ITEM(op, i));
@@ -556,8 +614,12 @@ static int handle_tuple(Request* req, PyObject* op) {
   for(Py_ssize_t i = 0; i < sz; ++i)
     cl += PyBytes_GET_SIZE(PyTuple_GET_ITEM(op, i));
 
-  int len = sprintf(req->resp.conlen, "\r\nContent-Length: %zu\r\n\r\n", cl);
-  BUFFER_STR_SIZE(get_buf(req), req->resp.conlen, len);
+  char* cur = req->resp.conlen + STRSZ("\r\nContent-Length: ");
+  cur = velocem_itoa(cl, cur, req->resp.conlen + sizeof(req->resp.conlen));
+  memcpy(cur, "\r\n\r\n", 4);
+
+  size_t used = (cur - req->resp.conlen) + 4;
+  BUFFER_STR_SIZE(get_buf(req), req->resp.conlen, used);
 
   for(Py_ssize_t i = 0; i < sz; ++i)
     BUFFER_PYBYTES(get_buf(req), PyTuple_GET_ITEM(op, i));
@@ -582,8 +644,17 @@ static int handle_app_ret(Request* req, PyObject* op) {
 
 static void start_response_worker(uv_work_t* thread) {
   Request* req = GET_THREAD_REQUEST(thread);
+
+
   PyGILState_STATE state = PyGILState_Ensure();
   PyObject* environ = build_environ(req);
+
+  req->str_views.blk->ref_count += req->str_views.idx;
+  req->str_views.blk = NULL;
+  req->str_comps.blk->ref_count += req->str_comps.idx;
+  req->str_comps.blk = NULL;
+
+
   PyObject* sr = PyCFunction_New(&_START_RESPONSE_DEF, NULL);
 
   // Illegal pointer smuggling, don't tell the Python border authorities
@@ -652,8 +723,10 @@ static void start_response_worker_cb(uv_work_t* thread, int /*status*/) {
 }
 
 static void start_processing(Request* req) {
+  Headers swap = req->proc;
+  swap.used = 0;
   req->proc = req->recv;
-  req->recv = (Headers) {};
+  req->recv = swap;
   req->state.processing = true;
   req->inflight = 0;
   uv_queue_work(uv_default_loop(), &req->thread, start_response_worker,
@@ -679,11 +752,15 @@ static llhttp_settings_t init_settings = {
     .on_message_complete = on_message_complete,
 };
 
-static Request* alloc_request(size_t buf_size, size_t send_count) {
-  Request* req = malloc(sizeof(*req) + buf_size);
-  req->len = buf_size;
+static Request* alloc_request(size_t send_count, size_t header_count) {
+  Request* req = malloc(sizeof(*req));
   req->send.bufs = malloc(sizeof(*req->send.bufs) * send_count);
   req->send.len = send_count;
+  req->recv.base = malloc(sizeof(*req->recv.base) * header_count);
+  req->recv.len = header_count;
+  req->proc.base = malloc(sizeof(*req->proc.base) * header_count);
+  req->proc.len = header_count;
+  STRCPY(req->resp.conlen, "\r\nContent-Length: ");
   return req;
 }
 
@@ -696,7 +773,10 @@ static void init_request(Request* req, Server* srv) {
   req->settings = init_settings;
   llhttp_init(&req->parser, HTTP_REQUEST, &req->settings);
 
-  req->recv = (Headers) {};
+  req->str_views.blk = NULL;
+  req->str_comps.blk = NULL;
+
+  req->recv.used = 0;
 
   req->resp.status = NULL;
   req->resp.headers = NULL;
@@ -708,21 +788,27 @@ static void init_request(Request* req, Server* srv) {
   req->url = NULL;
   req->query = NULL;
 
-  req->used = 0;
   req->parse_idx = 0;
+  req->rd = New_RefData();
 }
 
 static llhttp_errno_t exec_parse(Request* req) {
-  llhttp_errno_t err = llhttp_execute(&req->parser, req->buf + req->parse_idx,
-      req->used - req->parse_idx);
-  req->parse_idx = req->used;
+  RefCountedData* rd = req->rd;
+  llhttp_errno_t err = llhttp_execute(&req->parser, rd->data + req->parse_idx,
+      rd->used - req->parse_idx);
+  req->parse_idx = rd->used;
   return err;
 }
 
 static void alloc_buffer(uv_handle_t* handle, size_t, uv_buf_t* buf) {
-  Request* req = (Request*) handle;
-  buf->base = req->buf + req->used;
-  buf->len = req->len - req->used;
+  RefCountedData* rd = ((Request*) handle)->rd;
+  if(rd->used == rd->len) {
+    rd->len *= 2;
+    rd = realloc(rd, sizeof(*rd) + rd->len);
+    ((Request*) handle)->rd = rd;
+  }
+  buf->base = rd->data + rd->used;
+  buf->len = rd->len - rd->used;
 }
 
 static void handle_parse(Request* req);
@@ -734,38 +820,50 @@ static void on_read(uv_stream_t* client, ssize_t nRead, const uv_buf_t*) {
   }
 
   Request* req = (Request*) client;
-  req->used += nRead;
+  req->rd->used += nRead;
 
   handle_parse(req);
 }
 
 static void resume_recv(Request* req) {
+  RefCountedData* rd = req->rd;
   req->parse_idx = 0;
-
-  const char* endp = llhttp_get_error_pos(&req->parser);
-  const char* used_endp = req->buf + req->used;
-
-  if(endp == used_endp) {
-    req->used = 0;
-  } else {
-    size_t dist = used_endp - endp;
-    memcpy(req->buf, endp, dist);
-    req->used = dist;
-  }
 
   llhttp_resume(&req->parser);
   uv_read_start((uv_stream_t*) req, alloc_buffer, on_read);
-  if(req->used)
+  if(rd->used)
     handle_parse(req);
+}
+
+static void finalize_rd(Request* req) {
+  RefCountedData* old_rd = req->rd;
+  old_rd->ref_count += req->str_views.idx;
+
+  if(old_rd->ref_count)
+    req->rd = New_RefData();
+
+  if(req->state.keepalive) {
+    const char* endp = llhttp_get_error_pos(&req->parser);
+    const char* used_endp = old_rd->data + old_rd->used;
+
+    if(endp != used_endp) {
+      size_t dist = used_endp - endp;
+      memcpy(req->rd->data, endp, dist);
+      req->rd->used = dist;
+    }
+  }
 }
 
 static void handle_parse(Request* req) {
   llhttp_errno_t err = exec_parse(req);
 
-  if(err != HPE_OK && err != HPE_PAUSED)
+  if(err != HPE_OK && err != HPE_PAUSED) {
     uv_close((uv_handle_t*) req, on_close);
-  else if(req->state.received && !req->state.processing && !req->state.sending)
-    start_processing(req);
+  } else if(req->state.received) {
+    finalize_rd(req);
+    if(!req->state.processing && !req->state.sending)
+      start_processing(req);
+  }
 }
 
 static void on_connect(uv_stream_t* handle, int status) {

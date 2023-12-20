@@ -31,8 +31,17 @@ static PyObject* run(PyObject* self, PyObject* const* args, Py_ssize_t nargs,
   Py_RETURN_NONE;
 }
 
+static PyObject* make_balm(PyObject* self, PyObject* const* args,
+    Py_ssize_t nargs) {
+  BalmString* str = New_BalmString(sizeof("Hello World") - 1);
+  memcpy(str->data, "Hello World", sizeof("Hello World") - 1);
+  str->ob_base.ob_refcnt = 1;
+  return (PyObject*) str;
+}
+
 static PyMethodDef VelocemMethods[] = {
     {"run", (PyCFunction) run, METH_FASTCALL | METH_KEYWORDS},
+    {"make_balm", (PyCFunction) make_balm, METH_FASTCALL},
     {0},
 };
 

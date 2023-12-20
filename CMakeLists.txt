@@ -22,7 +22,7 @@ if(DEFINED VCPKG_ROOT_DIR)
   )
 endif()
 
-project(velocem LANGUAGES C VERSION 0.0.3)
+project(velocem LANGUAGES C CXX VERSION 0.0.3)
 
 find_package(Python3 3.12 REQUIRED COMPONENTS Development.Module)
 find_package(libuv CONFIG REQUIRED)
@@ -35,9 +35,10 @@ if(
   (CMAKE_C_COMPILER_ID STREQUAL "Clang") AND
   (CMAKE_C_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
 )
-  target_compile_options(velocem PRIVATE "/clang:-std=gnu2x")
+  target_compile_options(velocem PRIVATE "$<$<COMPILE_LANGUAGE:C>:/clang:-std=gnu2x>")
+  target_compile_features(velocem PRIVATE cxx_std_23)
 else()
-  target_compile_features(velocem PRIVATE c_std_23)
+  target_compile_features(velocem PRIVATE c_std_23 cxx_std_23)
 endif()
 
 if(CMAKE_C_COMPILER_FRONTEND_VARIANT STREQUAL "GNU")
