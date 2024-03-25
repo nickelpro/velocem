@@ -22,24 +22,16 @@ if(DEFINED VCPKG_ROOT_DIR)
   )
 endif()
 
-project(velocem LANGUAGES C CXX VERSION 0.0.3)
+project(velocem LANGUAGES C CXX VERSION 0.0.4)
 
 find_package(Python3 3.12 REQUIRED COMPONENTS Development.Module)
-find_package(libuv CONFIG REQUIRED)
+find_package(asio CONFIG REQUIRED)
 find_package(llhttp CONFIG REQUIRED)
 
 Python3_add_library(velocem MODULE)
-target_link_libraries(velocem PRIVATE libuv::uv_a llhttp::llhttp_static Python3::Module)
-
-if(
-  (CMAKE_C_COMPILER_ID STREQUAL "Clang") AND
-  (CMAKE_C_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
-)
-  target_compile_options(velocem PRIVATE "$<$<COMPILE_LANGUAGE:C>:/clang:-std=gnu2x>")
-  target_compile_features(velocem PRIVATE cxx_std_23)
-else()
-  target_compile_features(velocem PRIVATE c_std_23 cxx_std_23)
-endif()
+target_link_libraries(velocem PRIVATE asio::asio llhttp::llhttp_static Python3::Module)
+target_compile_features(velocem PRIVATE cxx_std_23)
+set_target_properties(velocem PROPERTIES CXX_VISIBILITY_PRESET hidden)
 
 if(CMAKE_C_COMPILER_FRONTEND_VARIANT STREQUAL "GNU")
   target_compile_options(velocem PRIVATE "-Wall")
