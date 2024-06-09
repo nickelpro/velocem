@@ -22,7 +22,7 @@ if(DEFINED VCPKG_ROOT_DIR)
   )
 endif()
 
-project(velocem LANGUAGES C CXX VERSION 0.0.4)
+project(velocem LANGUAGES C CXX VERSION 0.0.5)
 
 find_package(Python3 3.12 REQUIRED COMPONENTS Development.Module)
 find_package(asio CONFIG REQUIRED)
