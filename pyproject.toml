@@ -20,17 +20,18 @@ urls = { "Documentation" = "https://github.com/nickelpro/velocem" }
 dependencies = []
 
 [build-system]
-requires = ["py-build-cmake~=0.2.0a9"]
+requires = ["py-build-cmake~=0.2.0a14"]
 build-backend = "py_build_cmake.build"
 
 [tool.py-build-cmake.module]
 generated = "module"
 
 [tool.py-build-cmake.sdist]
-include = ["CMakeLists.txt", "vcpkg.json", "src/*"]
+include = ["CMakeLists.txt", "vcpkg.json", "src"]
 
 [tool.py-build-cmake.cmake]
 minimum_version = "3.17"
+config = "Release"
 build_type = "Release"
 build_args = ["-j"]
 
