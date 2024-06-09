@@ -37,6 +37,14 @@ if(WIN32)
   target_compile_definitions(velocem PRIVATE _WIN32_WINDOWS=0x0A00)
 endif()
 
+if(CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL GNU)
+  target_compile_options(velocem PRIVATE
+    -Wall -Wextra -Wno-missing-field-initializers -Wno-cast-function-type
+  )
+elseif(CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL MSVC)
+  target_compile_options(velocem PRIVATE /W3)
+endif()
+
 add_subdirectory(src)
 
 install(

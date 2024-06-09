@@ -365,8 +365,6 @@ asio::awaitable<void> client(tcp::socket s, auto& app) {
       }
     }
   } catch(std::exception& e) {
-    PySys_WriteStderr("Exception: %s\n", e.what());
-
     asio::error_code ec;
     s.shutdown(s.shutdown_both, ec);
     s.close(ec);
@@ -402,9 +400,9 @@ void accept(asio::execution::executor auto ex, std::string_view host,
   }
 }
 
-PyObject* run(PyObject* self, PyObject* const* args, Py_ssize_t nargs,
+PyObject* run(PyObject*, PyObject* const* args, Py_ssize_t nargs,
     PyObject* kwnames) {
-  static const char* keywords[] {"app", "host", "port"};
+  static const char* keywords[] {"app", "host", "port", nullptr};
   static _PyArg_Parser parser {.format = "O|ss:run", .keywords = keywords};
 
   PyObject* appObj;
