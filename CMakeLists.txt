@@ -33,8 +33,8 @@ target_link_libraries(velocem PRIVATE asio::asio llhttp::llhttp_static Python3::
 target_compile_features(velocem PRIVATE cxx_std_23)
 set_target_properties(velocem PROPERTIES CXX_VISIBILITY_PRESET hidden)
 
-if(CMAKE_C_COMPILER_FRONTEND_VARIANT STREQUAL "GNU")
-  target_compile_options(velocem PRIVATE "-Wall")
+if(WIN32)
+  target_compile_definitions(velocem PRIVATE _WIN32_WINDOWS=0x0A00)
 endif()
 
 add_subdirectory(src)

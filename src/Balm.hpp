@@ -67,37 +67,6 @@ inline auto format_as(BalmStringView sv) {
   return std::string_view {sv._base.utf8, (std::size_t) sv._base.utf8_length};
 }
 
-template <std::size_t N> struct BalmTuple {
-  BalmTuple(std::function<void(BalmStringView*)> f_dealloc)
-      : f_dealloc {f_dealloc} {
-    static PyTypeObject type = []() {
-      PyTypeObject ret = PyTuple_Type;
-      ret.tp_new = nullptr;
-      ret.tp_free = nullptr;
-      ret.tp_dealloc = dealloc;
-      return ret;
-    }();
-  }
-
-private:
-  union {
-    PyTupleObject pyt_;
-    struct {
-      PyObject_VAR_HEAD;
-      std::array<PyObject*, N> data;
-    };
-  };
-
-  const std::function<void(BalmTuple*)> f_dealloc;
-
-  static void dealloc(PyObject* self) {
-    auto ptr {reinterpret_cast<BalmTuple*>(self)};
-    for(auto pyobj : ptr->data)
-      Py_DECREF(pyobj);
-    ptr->f_dealloc(ptr);
-  }
-};
-
 } // namespace velocem
 
 #endif // VELOCEM_GIL_BALM_H
