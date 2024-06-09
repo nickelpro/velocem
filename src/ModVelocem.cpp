@@ -102,31 +102,9 @@ template <asio::execution::executor Ex> struct PythonApp {
     Py_DECREF(cap_);
   }
 
-  template <typename CT>
-  auto run(Request* req, int http_minor, int meth, PyResult& pr, CT&& token) {
-    auto init = [=, this, &pr](auto handler) {
-      dispatch(ex_, [=, this, &pr, h = std::move(handler)]() mutable {
-        dispatch(
-            asio::append(std::move(h), run_impl(req, http_minor, meth, pr)));
-      });
-    };
-
-    return asio::async_initiate<CT, void(PyResult)>(init, token);
-  }
-
-  template <typename CT> auto decref_pyresult(PyResult& pr, CT&& token) {
-    auto init = [&](auto handler) {
-      dispatch(ex_, [&, h = std::move(handler)]() mutable {
-        decref_pyresult_impl(pr);
-        dispatch(std::move(h));
-      });
-    };
-    return asio::async_initiate<CT, void()>(init, token);
-  }
-
-  PyResult run_impl(Request* req, int http_minor, int meth, PyResult& pr) {
+  PyResult run(Request* req, int http_minor, int meth, PyResult& pr) {
     if(pr.status_obj)
-      decref_pyresult_impl(pr);
+      decref_pyresult(pr);
 
     PyResult ret {};
 
@@ -238,8 +216,7 @@ template <asio::execution::executor Ex> struct PythonApp {
     return env;
   }
 
-  void decref_pyresult_impl(PyResult& pr) {
-    ;
+  void decref_pyresult(PyResult& pr) {
     Py_DECREF(pr.status_obj);
     Py_DECREF(pr.headers_obj);
     for(auto pyobj : pr.body_objs)
@@ -329,33 +306,41 @@ asio::awaitable<void> client(tcp::socket s, auto& app) {
         std::memcpy(next_req->buf.data(), rm.data(), rm.size());
       }
 
-      pr = app.run_impl(req, http.http_minor, http.method, pr);
+      pr = app.run(req, http.http_minor, http.method, pr);
       req = nullptr;
 
-      std::size_t resv {3 + 4 * pr.headers.size() + 3 + pr.body.size()};
+      // THIS IS 7us FASTER THAN VECTORED I/O
+      //     !!! RETVRN TO TRADITION !!!
+      std::vector<char> send_buf;
+      send_buf.reserve(1000);
 
-      std::vector<asio::const_buffer> send_buffers;
-      send_buffers.reserve(resv);
+      static char ht[] = "HTTP/1.1 ";
+      send_buf.insert(send_buf.end(), ht, ht + 9);
+      send_buf.insert(send_buf.end(), pr.status.begin(), pr.status.end());
 
-      send_buffers.emplace_back(asio::buffer("HTTP/1.1 ", 9));
-      send_buffers.emplace_back(asio::buffer(pr.status));
-      send_buffers.emplace_back(asio::buffer("\r\n", 2));
+      static char rn[] = "\r\n";
+      send_buf.insert(send_buf.end(), rn, rn + 2);
 
+
+      static char cl[] = ": ";
       for(const auto& hdr : pr.headers) {
-        send_buffers.emplace_back(asio::buffer(hdr.first));
-        send_buffers.emplace_back(asio::buffer(": ", 2));
-        send_buffers.emplace_back(asio::buffer(hdr.second));
-        send_buffers.emplace_back(asio::buffer("\r\n", 2));
+        send_buf.insert(send_buf.end(), hdr.first.begin(), hdr.first.end());
+        send_buf.insert(send_buf.end(), cl, cl + 2);
+        send_buf.insert(send_buf.end(), hdr.second.begin(), hdr.second.end());
+        send_buf.insert(send_buf.end(), rn, rn + 2);
       }
-      send_buffers.emplace_back(asio::buffer("Content-Length: ", 16));
+      static char col[] = "Content-Length: ";
+      send_buf.insert(send_buf.end(), col, col + 16);
       std::string conlen {std::to_string(pr.total_size)};
-      send_buffers.emplace_back(asio::buffer(conlen));
-      send_buffers.emplace_back(asio::buffer("\r\n\r\n", 4));
+      send_buf.insert(send_buf.end(), conlen.begin(), conlen.end());
+
+      static char rnrn[] = "\r\n\r\n";
+      send_buf.insert(send_buf.end(), rnrn, rnrn + 4);
 
       for(const auto& part : pr.body)
-        send_buffers.emplace_back(asio::buffer(part));
+        send_buf.insert(send_buf.end(), part.begin(), part.end());
 
-      co_await s.async_send(send_buffers, deferred);
+      co_await s.async_send(asio::buffer(send_buf), deferred);
 
       if(!http.keep_alive()) {
         asio::error_code ec;
@@ -377,7 +362,7 @@ asio::awaitable<void> client(tcp::socket s, auto& app) {
     delete next_req;
 
   if(pr.status_obj)
-    app.decref_pyresult_impl(pr);
+    app.decref_pyresult(pr);
 }
 
 asio::awaitable<void> listener(tcp::endpoint ep, auto& app) {
@@ -408,7 +393,6 @@ PyObject* run(PyObject*, PyObject* const* args, Py_ssize_t nargs,
   PyObject* appObj;
   const char* host = "localhost";
   const char* port = "8000";
-
 
   if(!_PyArg_ParseStackAndKeywords(args, nargs, kwnames, &parser, &appObj,
          &host, &port))

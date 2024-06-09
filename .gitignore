@@ -1,6 +1,7 @@
 .vscode/
 .venv/
 build/
+callgrind/
 test/
 dist/
 bm/
