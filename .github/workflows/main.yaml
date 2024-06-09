@@ -27,7 +27,7 @@ jobs:
           CIBW_BUILD_FRONTEND: build
           CIBW_BEFORE_ALL_LINUX: dnf install -y git zip
           CIBW_MANYLINUX_X86_64_IMAGE: manylinux_2_28
-        uses: pypa/cibuildwheel@v2.16.2
+        uses: pypa/cibuildwheel@v2.18.1
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v3
