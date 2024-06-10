@@ -22,19 +22,6 @@ namespace this_coro = asio::this_coro;
 
 namespace velocem {
 
-struct PyResult {
-  PyObject* status_obj;
-  std::string_view status;
-
-  PyObject* headers_obj;
-  std::vector<std::pair<std::string_view, std::string_view>> headers;
-
-  std::vector<PyObject*> body_objs;
-  std::vector<std::string_view> body;
-  std::size_t total_size;
-};
-
-
 struct {
   PyObject* empty {PyUnicode_New(0, 0)};
   PyObject* query {PyUnicode_FromString("QUERY_STRING")};
@@ -102,16 +89,13 @@ template <asio::execution::executor Ex> struct PythonApp {
     Py_DECREF(cap_);
   }
 
-  PyResult run(Request* req, int http_minor, int meth, PyResult& pr) {
-    if(pr.status_obj)
-      decref_pyresult(pr);
+  std::vector<char> run(Request* req, int http_minor, int meth) {
 
-    PyResult ret {};
+
+    std::vector<char> buf;
+    buf.reserve(1024); // Nice round numbers
 
     auto env {make_env(req, http_minor, meth)};
-
-    status_ = nullptr;
-
     PyObject* iter;
 
     if(vecCall_) {
@@ -123,68 +107,92 @@ template <asio::execution::executor Ex> struct PythonApp {
 
     Py_DECREF(env);
 
-    ret.headers_obj = headers_;
-    ret.status_obj = status_;
+    insert_chars(buf, "HTTP/1.1 ", 9);
+    insert_pystr(buf, status_);
+    insert_chars(buf, "\r\n", 2);
+    Py_DECREF(status_);
 
-    char* base = (char*) PyUnicode_DATA(status_);
-    std::size_t len = (std::size_t) PyUnicode_GET_LENGTH(status_);
-    ret.status = {base, len};
-
-
-    Py_ssize_t listlen = PyList_GET_SIZE(headers_);
-    ret.headers.reserve(listlen);
+    Py_ssize_t listlen {PyList_GET_SIZE(headers_)};
     for(Py_ssize_t i {0}; i < listlen; ++i) {
       PyObject* tuple {PyList_GET_ITEM(headers_, i)};
 
       PyObject* field {PyTuple_GET_ITEM(tuple, 0)};
-      char* f_data {(char*) PyUnicode_DATA(field)};
-      std::size_t f_len {(std::size_t) PyUnicode_GET_LENGTH(field)};
+      insert_pystr(buf, field);
+      insert_chars(buf, ": ", 2);
+
 
       PyObject* value {PyTuple_GET_ITEM(tuple, 1)};
-      char* v_data {(char*) PyUnicode_DATA(value)};
-      std::size_t v_len {(std::size_t) PyUnicode_GET_LENGTH(value)};
-
-      ret.headers.emplace_back(std::string_view {f_data, f_len},
-          std::string_view {v_data, v_len});
+      insert_pystr(buf, value);
+      insert_chars(buf, "\r\n", 2);
     }
+    Py_DECREF(headers_);
+
+    std::size_t bodysize;
+    if(PyBytes_Check(iter))
+      bodysize = (std::size_t) PyBytes_GET_SIZE(iter);
+    else if(PyList_Check(iter))
+      bodysize = get_body_list_size(iter);
+    else if(PyTuple_Check(iter))
+      bodysize = get_body_tuple_size(iter);
+    else
+      bodysize = 0; // ToDO
+
+    insert_chars(buf, "Content-Length: ", 16);
+    auto conlen {std::to_string(bodysize)};
+    insert_chars(buf, conlen.data(), conlen.size());
+    insert_chars(buf, "\r\n\r\n", 4);
 
     if(PyBytes_Check(iter)) {
-      ret.body_objs.push_back(iter);
-      base = PyBytes_AS_STRING(iter);
-      len = (std::size_t) PyBytes_GET_SIZE(iter);
-      ret.body.emplace_back(base, len);
-      ret.total_size = len;
+      insert_chars(buf, PyBytes_AS_STRING(iter), bodysize);
     } else if(PyList_Check(iter)) {
-      listlen = PyList_GET_SIZE(iter);
-      ret.body_objs.reserve(listlen);
+      Py_ssize_t listlen {PyList_GET_SIZE(iter)};
       for(Py_ssize_t i {0}; i < listlen; ++i) {
         PyObject* obj {PyList_GET_ITEM(iter, i)};
-        Py_INCREF(obj);
-        ret.body_objs.push_back(obj);
-        base = PyBytes_AS_STRING(obj);
-        len = (std::size_t) PyBytes_GET_SIZE(obj);
-        ret.body.emplace_back(base, len);
-        ret.total_size += len;
+        insert_chars(buf, PyBytes_AS_STRING(obj), PyBytes_GET_SIZE(obj));
       }
-      Py_DecRef(iter);
     } else if(PyTuple_Check(iter)) {
-      listlen = PyTuple_GET_SIZE(iter);
-      ret.body_objs.reserve(listlen);
+      Py_ssize_t listlen {PyTuple_GET_SIZE(iter)};
       for(Py_ssize_t i {0}; i < listlen; ++i) {
         PyObject* obj {PyTuple_GET_ITEM(iter, i)};
-        Py_INCREF(obj);
-        ret.body_objs.push_back(obj);
-        base = PyBytes_AS_STRING(obj);
-        len = (std::size_t) PyBytes_GET_SIZE(obj);
-        ret.body.emplace_back(base, len);
-        ret.total_size += len;
+        insert_chars(buf, PyBytes_AS_STRING(obj), PyBytes_GET_SIZE(obj));
       }
-      Py_DecRef(iter);
     } else {
       // TODO: iterable obj
     }
+    Py_DecRef(iter);
 
-    return ret;
+    return buf;
+  }
+
+  static void insert_pystr(std::vector<char>& vec, PyObject* str) {
+    char* base {(char*) PyUnicode_DATA(str)};
+    std::size_t len {(std::size_t) PyUnicode_GET_LENGTH(str)};
+    vec.insert(vec.end(), base, base + len);
+  }
+
+  static void insert_chars(std::vector<char>& vec, const char* str,
+      std::size_t len) {
+    vec.insert(vec.end(), str, str + len);
+  }
+
+  static std::size_t get_body_list_size(PyObject* list) {
+    std::size_t sz {0};
+    Py_ssize_t listlen {PyList_GET_SIZE(list)};
+    for(Py_ssize_t i {0}; i < listlen; ++i) {
+      PyObject* obj {PyList_GET_ITEM(list, i)};
+      sz += (std::size_t) PyBytes_GET_SIZE(obj);
+    }
+    return sz;
+  }
+
+  static std::size_t get_body_tuple_size(PyObject* tpl) {
+    std::size_t sz {0};
+    Py_ssize_t tpllen {PyTuple_GET_SIZE(tpl)};
+    for(Py_ssize_t i {0}; i < tpllen; ++i) {
+      PyObject* obj {PyTuple_GET_ITEM(tpl, i)};
+      sz += (std::size_t) PyBytes_GET_SIZE(obj);
+    }
+    return sz;
   }
 
   PyObject* make_env(Request* req, int http_minor, int meth) {
@@ -214,13 +222,6 @@ template <asio::execution::executor Ex> struct PythonApp {
     replace_key(env, gPO.http_contype, gPO.contype);
 
     return env;
-  }
-
-  void decref_pyresult(PyResult& pr) {
-    Py_DECREF(pr.status_obj);
-    Py_DECREF(pr.headers_obj);
-    for(auto pyobj : pr.body_objs)
-      Py_DECREF(pyobj);
   }
 
   static void replace_key(PyObject* dict, PyObject* oldK, PyObject* newK) {
@@ -272,9 +273,6 @@ template <asio::execution::executor Ex> struct PythonApp {
 };
 
 asio::awaitable<void> client(tcp::socket s, auto& app) {
-
-
-  PyResult pr {};
   Request* req {new Request};
   Request* next_req {nullptr};
   HTTPParser http {req};
@@ -284,9 +282,7 @@ asio::awaitable<void> client(tcp::socket s, auto& app) {
       size_t offset {0};
 
       if(next_req) {
-        req = next_req;
-        next_req = nullptr;
-
+        std::swap(req, next_req);
         std::size_t n {req->buf.size()};
         http.resume(req, req->get_parse_buf(0, n));
         offset += n;
@@ -306,41 +302,12 @@ asio::awaitable<void> client(tcp::socket s, auto& app) {
         std::memcpy(next_req->buf.data(), rm.data(), rm.size());
       }
 
-      pr = app.run(req, http.http_minor, http.method, pr);
+      auto buf {app.run(req, http.http_minor, http.method)};
       req = nullptr;
 
       // THIS IS 7us FASTER THAN VECTORED I/O
       //     !!! RETVRN TO TRADITION !!!
-      std::vector<char> send_buf;
-      send_buf.reserve(1000);
-
-      static char ht[] = "HTTP/1.1 ";
-      send_buf.insert(send_buf.end(), ht, ht + 9);
-      send_buf.insert(send_buf.end(), pr.status.begin(), pr.status.end());
-
-      static char rn[] = "\r\n";
-      send_buf.insert(send_buf.end(), rn, rn + 2);
-
-
-      static char cl[] = ": ";
-      for(const auto& hdr : pr.headers) {
-        send_buf.insert(send_buf.end(), hdr.first.begin(), hdr.first.end());
-        send_buf.insert(send_buf.end(), cl, cl + 2);
-        send_buf.insert(send_buf.end(), hdr.second.begin(), hdr.second.end());
-        send_buf.insert(send_buf.end(), rn, rn + 2);
-      }
-      static char col[] = "Content-Length: ";
-      send_buf.insert(send_buf.end(), col, col + 16);
-      std::string conlen {std::to_string(pr.total_size)};
-      send_buf.insert(send_buf.end(), conlen.begin(), conlen.end());
-
-      static char rnrn[] = "\r\n\r\n";
-      send_buf.insert(send_buf.end(), rnrn, rnrn + 4);
-
-      for(const auto& part : pr.body)
-        send_buf.insert(send_buf.end(), part.begin(), part.end());
-
-      co_await s.async_send(asio::buffer(send_buf), deferred);
+      co_await s.async_send(asio::buffer(buf), deferred);
 
       if(!http.keep_alive()) {
         asio::error_code ec;
@@ -360,9 +327,6 @@ asio::awaitable<void> client(tcp::socket s, auto& app) {
 
   if(next_req)
     delete next_req;
-
-  if(pr.status_obj)
-    app.decref_pyresult(pr);
 }
 
 asio::awaitable<void> listener(tcp::endpoint ep, auto& app) {
