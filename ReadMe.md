@@ -1,6 +1,10 @@
+[![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/nickelpro/velocem/main.yaml?style=for-the-badge)](https://github.com/nickelpro/velocem/actions/workflows/main.yaml)
+[![Gunicorn](https://img.shields.io/badge/Faster%20Than%20Gunicorn-1418%25-08824c?style=for-the-badge)](https://github.com/benoitc/gunicorn)
+[![FastWSGI](https://img.shields.io/badge/Faster%20Than%20FastWSGI-5.15%25-lightblue?style=for-the-badge)](https://github.com/jamesroberts/fastwsgi)
+
 # Velocem
 
-This is a Work-In-Progress experimental Python C extension. It aims to provide
+This is a Work-In-Progress experimental Python extension. It aims to provide
 a stupid-fast, pointlessly low-latency, web development framework.
 
 If you use this code in production you get what you deserve.
