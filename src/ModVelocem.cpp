@@ -1,6 +1,7 @@
 #include <array>
 #include <csignal>
 #include <exception>
+#include <optional>
 #include <ranges>
 #include <string_view>
 #include <utility>
@@ -13,6 +14,7 @@
 
 #include "HTTPParser.hpp"
 #include "Request.hpp"
+#include "Util.hpp"
 
 using asio::awaitable;
 using asio::deferred;
@@ -89,110 +91,96 @@ template <asio::execution::executor Ex> struct PythonApp {
     Py_DECREF(cap_);
   }
 
-  std::vector<char> run(Request* req, int http_minor, int meth) {
+  std::optional<std::vector<char>> run(Request* req, int http_minor, int meth) {
 
 
     std::vector<char> buf;
     buf.reserve(1024); // Nice round numbers
 
     auto env {make_env(req, http_minor, meth)};
-    PyObject* iter;
+    PyObject* iter {nullptr};
 
-    if(vecCall_) {
-      std::array args {env, sr_};
-      iter = vecCall_(app_, args.data(), args.size(), NULL);
-    } else {
-      iter = PyObject_CallFunctionObjArgs(app_, env, sr_, nullptr);
+    status_ = nullptr;
+    headers_ = nullptr;
+
+    try {
+      if(vecCall_) {
+        std::array args {env, sr_};
+        iter = vecCall_(app_, args.data(), args.size(), nullptr);
+      } else {
+        iter = PyObject_CallFunctionObjArgs(app_, env, sr_, nullptr);
+      }
+
+      Py_DECREF(env);
+
+      if(!iter)
+        throw std::runtime_error {"Python function call error"};
+
+      insert_literal(buf, "HTTP/1.1 ");
+      insert_pystr(buf, status_);
+      insert_literal(buf, "\r\n");
+
+      Py_ssize_t listlen {PyList_Size(headers_)};
+      if(listlen < 0)
+        throw std::runtime_error {"Python list error"};
+
+      for(Py_ssize_t i {0}; i < listlen; ++i) {
+        PyObject* tuple {PyList_GET_ITEM(headers_, i)};
+
+        PyObject* field {PyTuple_GET_ITEM(tuple, 0)};
+        insert_pystr(buf, field);
+        insert_literal(buf, ": ");
+
+
+        PyObject* value {PyTuple_GET_ITEM(tuple, 1)};
+        insert_pystr(buf, value);
+        insert_literal(buf, "\r\n");
+      }
+
+      std::size_t bodysize;
+      if(PyBytes_Check(iter))
+        bodysize = (std::size_t) PyBytes_GET_SIZE(iter);
+      else if(PyList_Check(iter))
+        bodysize = get_body_list_size(iter);
+      else if(PyTuple_Check(iter))
+        bodysize = get_body_tuple_size(iter);
+      else
+        bodysize = 0; // ToDO
+
+      insert_literal(buf, "Content-Length: ");
+      auto conlen {std::to_string(bodysize)};
+      insert_chars(buf, conlen.data(), conlen.size());
+      insert_literal(buf, "\r\n\r\n");
+
+      if(PyBytes_Check(iter)) {
+        insert_chars(buf, PyBytes_AS_STRING(iter), bodysize);
+      } else if(PyList_Check(iter)) {
+        Py_ssize_t listlen {PyList_GET_SIZE(iter)};
+        for(Py_ssize_t i {0}; i < listlen; ++i)
+          insert_pybytes_unchecked(buf, PyList_GET_ITEM(iter, i));
+      } else if(PyTuple_Check(iter)) {
+        Py_ssize_t listlen {PyTuple_GET_SIZE(iter)};
+        for(Py_ssize_t i {0}; i < listlen; ++i)
+          insert_pybytes_unchecked(buf, PyTuple_GET_ITEM(iter, i));
+      } else {
+        // TODO: iterable obj
+      }
+
+    } catch(...) {
+      PyErr_Print();
+      PyErr_Clear();
+
+      Py_XDECREF(iter);
+      Py_XDECREF(status_);
+      Py_XDECREF(headers_);
+      return {};
     }
 
-    Py_DECREF(env);
-
-    insert_chars(buf, "HTTP/1.1 ", 9);
-    insert_pystr(buf, status_);
-    insert_chars(buf, "\r\n", 2);
     Py_DECREF(status_);
-
-    Py_ssize_t listlen {PyList_GET_SIZE(headers_)};
-    for(Py_ssize_t i {0}; i < listlen; ++i) {
-      PyObject* tuple {PyList_GET_ITEM(headers_, i)};
-
-      PyObject* field {PyTuple_GET_ITEM(tuple, 0)};
-      insert_pystr(buf, field);
-      insert_chars(buf, ": ", 2);
-
-
-      PyObject* value {PyTuple_GET_ITEM(tuple, 1)};
-      insert_pystr(buf, value);
-      insert_chars(buf, "\r\n", 2);
-    }
     Py_DECREF(headers_);
-
-    std::size_t bodysize;
-    if(PyBytes_Check(iter))
-      bodysize = (std::size_t) PyBytes_GET_SIZE(iter);
-    else if(PyList_Check(iter))
-      bodysize = get_body_list_size(iter);
-    else if(PyTuple_Check(iter))
-      bodysize = get_body_tuple_size(iter);
-    else
-      bodysize = 0; // ToDO
-
-    insert_chars(buf, "Content-Length: ", 16);
-    auto conlen {std::to_string(bodysize)};
-    insert_chars(buf, conlen.data(), conlen.size());
-    insert_chars(buf, "\r\n\r\n", 4);
-
-    if(PyBytes_Check(iter)) {
-      insert_chars(buf, PyBytes_AS_STRING(iter), bodysize);
-    } else if(PyList_Check(iter)) {
-      Py_ssize_t listlen {PyList_GET_SIZE(iter)};
-      for(Py_ssize_t i {0}; i < listlen; ++i) {
-        PyObject* obj {PyList_GET_ITEM(iter, i)};
-        insert_chars(buf, PyBytes_AS_STRING(obj), PyBytes_GET_SIZE(obj));
-      }
-    } else if(PyTuple_Check(iter)) {
-      Py_ssize_t listlen {PyTuple_GET_SIZE(iter)};
-      for(Py_ssize_t i {0}; i < listlen; ++i) {
-        PyObject* obj {PyTuple_GET_ITEM(iter, i)};
-        insert_chars(buf, PyBytes_AS_STRING(obj), PyBytes_GET_SIZE(obj));
-      }
-    } else {
-      // TODO: iterable obj
-    }
-    Py_DecRef(iter);
+    Py_DECREF(iter);
 
     return buf;
-  }
-
-  static void insert_pystr(std::vector<char>& vec, PyObject* str) {
-    char* base {(char*) PyUnicode_DATA(str)};
-    std::size_t len {(std::size_t) PyUnicode_GET_LENGTH(str)};
-    vec.insert(vec.end(), base, base + len);
-  }
-
-  static void insert_chars(std::vector<char>& vec, const char* str,
-      std::size_t len) {
-    vec.insert(vec.end(), str, str + len);
-  }
-
-  static std::size_t get_body_list_size(PyObject* list) {
-    std::size_t sz {0};
-    Py_ssize_t listlen {PyList_GET_SIZE(list)};
-    for(Py_ssize_t i {0}; i < listlen; ++i) {
-      PyObject* obj {PyList_GET_ITEM(list, i)};
-      sz += (std::size_t) PyBytes_GET_SIZE(obj);
-    }
-    return sz;
-  }
-
-  static std::size_t get_body_tuple_size(PyObject* tpl) {
-    std::size_t sz {0};
-    Py_ssize_t tpllen {PyTuple_GET_SIZE(tpl)};
-    for(Py_ssize_t i {0}; i < tpllen; ++i) {
-      PyObject* obj {PyTuple_GET_ITEM(tpl, i)};
-      sz += (std::size_t) PyBytes_GET_SIZE(obj);
-    }
-    return sz;
   }
 
   PyObject* make_env(Request* req, int http_minor, int meth) {
@@ -257,7 +245,7 @@ template <asio::execution::executor Ex> struct PythonApp {
 
   static PyObject* start_response_tr(PyObject* self, PyObject* const* args,
       Py_ssize_t nargs, PyObject* kwnames) {
-    auto pyapp {PyCapsule_GetPointer(self, NULL)};
+    auto pyapp {PyCapsule_GetPointer(self, nullptr)};
     return ((PythonApp*) pyapp)->start_response(args, nargs, kwnames);
   }
 
@@ -279,7 +267,7 @@ asio::awaitable<void> client(tcp::socket s, auto& app) {
 
   try {
     for(;;) {
-      size_t offset {0};
+      std::size_t offset {0};
 
       if(next_req) {
         std::swap(req, next_req);
@@ -302,21 +290,25 @@ asio::awaitable<void> client(tcp::socket s, auto& app) {
         std::memcpy(next_req->buf.data(), rm.data(), rm.size());
       }
 
-      auto buf {app.run(req, http.http_minor, http.method)};
+      auto appret {app.run(req, http.http_minor, http.method)};
       req = nullptr;
 
-      // THIS IS 7us FASTER THAN VECTORED I/O
-      //     !!! RETVRN TO TRADITION !!!
-      co_await s.async_send(asio::buffer(buf), deferred);
+      if(!appret) {
+        co_await s.async_send(
+            asio::buffer("HTTP/1.1 500 Internal Server Error\r\n\r\n", 38),
+            deferred);
+      } else {
+        co_await s.async_send(asio::buffer(*appret), deferred);
+      }
 
-      if(!http.keep_alive()) {
+      if(!http.keep_alive() || !appret) {
         asio::error_code ec;
         s.shutdown(s.shutdown_both, ec);
         s.close(ec);
         break;
       }
     }
-  } catch(std::exception& e) {
+  } catch(...) {
     asio::error_code ec;
     s.shutdown(s.shutdown_both, ec);
     s.close(ec);
