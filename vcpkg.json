@@ -6,7 +6,7 @@
   "maintainers": [
     "Vito Gamberini <vito@gamberini.email>"
   ],
-  "license": "Zlib",
+  "license": "MIT-0",
   "dependencies": [
     "llhttp",
     "asio"

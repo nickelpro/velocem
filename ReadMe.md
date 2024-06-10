@@ -17,11 +17,7 @@ into the public domain via CC0-1.0, see `License` for details.
 I (Vito Gamberini) hold no patents and have no knowledge of any patented
 techniques used by Velocem. However, some organizations refuse to incorporate or
 distribute public domain code due to patent concerns, for this reason Velocem is
-additionally licensed for use under Zlib, see `UsageLicense` for details.
-
-As the source code itself is public domain, there is no need to retain licensing
-information in full or partial source code distributions unless the patent
-concerns are of significance to you.
+additionally licensed for use under MIT-0, see `UsageLicense` for details.
 
 The purpose in using these well known legal texts is that they are widely
 trusted and understood by the open source community. A bespoke legal text might
