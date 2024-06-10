@@ -54,7 +54,7 @@ template <asio::execution::executor Ex> struct PythonApp {
 
     cap_ = PyCapsule_New(this, NULL, NULL);
     sr_ = PyCFunction_New(&srdef, cap_);
-    baseEnv_ = _PyDict_NewPresized(50);
+    baseEnv_ = _PyDict_NewPresized(64);
 
     PyObject* ver {PyTuple_Pack(2, PyLong_FromLong(1), PyLong_FromLong(0))};
     PyDict_SetItemString(baseEnv_, "wsgi.version", ver);

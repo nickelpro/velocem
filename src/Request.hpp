@@ -55,8 +55,8 @@ struct Header {
 struct Request {
 
   Request() {
-    headers.reserve(20);
-    values.reserve(20);
+    headers.reserve(32);
+    values.reserve(32);
   }
 
 
