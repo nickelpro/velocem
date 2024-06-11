@@ -20,6 +20,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Xcode Switch
+        if: runner.os == 'macOS'
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest
+
       - name: Build
         env:
           CIBW_SKIP: "pp*"
@@ -27,6 +33,7 @@ jobs:
           CIBW_BUILD_FRONTEND: build
           CIBW_BEFORE_ALL_LINUX: dnf install -y git zip
           CIBW_MANYLINUX_X86_64_IMAGE: manylinux_2_28
+          MACOSX_DEPLOYMENT_TARGET: "13.3"
         uses: pypa/cibuildwheel@v2.18.1
 
       - name: Upload Artifacts
