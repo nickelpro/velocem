@@ -120,14 +120,8 @@ struct PythonApp {
 
     PyDict_SetItem(env, gPO.proto, http_minor ? gPO.http11 : gPO.http10);
 
-    // Switch this when we get manylinux_2_34
-    // for(const auto& [hdr, val] : std::views::zip(req->headers, req->values))
-    //   PyDict_SetItem(env, (PyObject*) &hdr.bsv, (PyObject*) &val);
-
-    for(size_t i {0}; i < req->headers.size(); ++i)
-      PyDict_SetItem(env, (PyObject*) &req->headers[i].bsv,
-          (PyObject*) &req->values[i]);
-
+    for(const auto& [hdr, val] : std::views::zip(req->headers, req->values))
+      PyDict_SetItem(env, (PyObject*) &hdr.bsv, (PyObject*) &val);
 
     replace_key(env, gPO.http_conlen, gPO.conlen);
     replace_key(env, gPO.http_contype, gPO.contype);

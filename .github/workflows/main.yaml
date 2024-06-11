@@ -14,7 +14,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [windows-latest, macos-latest]
 
     steps:
       - name: Checkout
@@ -29,10 +29,10 @@ jobs:
       - name: Build
         env:
           CIBW_SKIP: "pp*"
-          CIBW_BUILD: "*win_amd64 *mac* *-manylinux_x86_64"
+          CIBW_BUILD: "*win_amd64 *mac*"
           CIBW_BUILD_FRONTEND: build
-          CIBW_BEFORE_ALL_LINUX: dnf install -y git zip
-          CIBW_MANYLINUX_X86_64_IMAGE: manylinux_2_28
+          # CIBW_BEFORE_ALL_LINUX: dnf install -y git zip
+          # CIBW_MANYLINUX_X86_64_IMAGE: manylinux_2_34
           MACOSX_DEPLOYMENT_TARGET: "13.3"
         uses: pypa/cibuildwheel@v2.18.1
 
