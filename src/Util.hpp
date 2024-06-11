@@ -3,6 +3,7 @@
 
 #include <cstdlib>
 #include <exception>
+#include <string>
 #include <vector>
 
 #define PY_SSIZE_T_CLEAN
@@ -18,6 +19,10 @@ void insert_literal(std::vector<char>& vec, const char (&str)[N]) {
 inline void insert_chars(std::vector<char>& vec, const char* str,
     std::size_t len) {
   vec.insert(vec.end(), str, str + len);
+}
+
+inline void insert_str(std::vector<char>& vec, const std::string& str) {
+  vec.insert(vec.end(), str.begin(), str.end());
 }
 
 inline void insert_pystr(std::vector<char>& vec, PyObject* str) {
@@ -66,6 +71,16 @@ inline std::size_t get_body_tuple_size(PyObject* tuple) {
     sz += obj_sz;
   }
   return sz;
+}
+
+inline void replace_key(PyObject* dict, PyObject* oldK, PyObject* newK) {
+  PyObject* value {PyDict_GetItem(dict, oldK)};
+  if(value) {
+    Py_INCREF(value);
+    PyDict_DelItem(dict, oldK);
+    PyDict_SetItem(dict, newK, value);
+    Py_DECREF(value);
+  }
 }
 
 } // namespace velocem
