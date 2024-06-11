@@ -16,7 +16,7 @@
 
 namespace velocem {
 
-static bool validate_and_insert_header(std::vector<char>& buf, PyObject* str) {
+static bool insert_field(std::vector<char>& buf, PyObject* str) {
   const char* base;
   Py_ssize_t len;
   unpack_unicode(str, &base, &len, "Header fields must be str objects");
@@ -31,6 +31,58 @@ static bool validate_and_insert_header(std::vector<char>& buf, PyObject* str) {
   buf.insert(buf.end(), base, base + len);
   return true;
 }
+
+static void insert_header(std::vector<char>& buf, PyObject* tuple) {
+  if(!PyTuple_Check(tuple)) [[unlikely]] {
+    PyErr_SetString(PyExc_TypeError, "Header must be size two tuples");
+    throw std::runtime_error {"Python tuple error"};
+  }
+
+  if(PyTuple_GET_SIZE(tuple) != 2) [[unlikely]] {
+    PyErr_SetString(PyExc_ValueError, "Header tuple must be size two");
+    throw std::runtime_error {"Python tuple error"};
+  }
+
+  PyObject* field {PyTuple_GET_ITEM(tuple, 0)};
+  if(!insert_field(buf, field)) [[unlikely]]
+    return;
+  insert_literal(buf, ": ");
+
+  PyObject* value {PyTuple_GET_ITEM(tuple, 1)};
+  insert_pystr(buf, value, "Header values must be str objects");
+  insert_literal(buf, "\r\n");
+}
+
+static void build_body(std::vector<char>& buf, PyObject* iter) {
+  std::size_t bodysize;
+  if(PyBytes_Check(iter))
+    bodysize = (std::size_t) PyBytes_GET_SIZE(iter);
+  else if(PyList_Check(iter))
+    bodysize = get_body_list_size(iter);
+  else if(PyTuple_Check(iter))
+    bodysize = get_body_tuple_size(iter);
+  else
+    bodysize = 0; // ToDO
+
+  insert_literal(buf, "Content-Length: ");
+  insert_str(buf, std::to_string(bodysize));
+  insert_literal(buf, "\r\n\r\n");
+
+  if(PyBytes_Check(iter)) {
+    insert_chars(buf, PyBytes_AS_STRING(iter), bodysize);
+  } else if(PyList_Check(iter)) {
+    Py_ssize_t listlen {PyList_GET_SIZE(iter)};
+    for(Py_ssize_t i {0}; i < listlen; ++i)
+      insert_pybytes_unchecked(buf, PyList_GET_ITEM(iter, i));
+  } else if(PyTuple_Check(iter)) {
+    Py_ssize_t listlen {PyTuple_GET_SIZE(iter)};
+    for(Py_ssize_t i {0}; i < listlen; ++i)
+      insert_pybytes_unchecked(buf, PyTuple_GET_ITEM(iter, i));
+  } else {
+    // TODO: iterable obj
+  }
+}
+
 
 struct PythonApp {
   PythonApp(PyObject* app, const char* host, const char* port)
@@ -160,58 +212,8 @@ struct PythonApp {
       throw std::runtime_error {"Python list error"};
     }
 
-    for(Py_ssize_t i {0}, end {PyList_GET_SIZE(headers_)}; i < end; ++i) {
-      PyObject* tuple {PyList_GET_ITEM(headers_, i)};
-
-      if(!PyTuple_Check(tuple)) [[unlikely]] {
-        PyErr_SetString(PyExc_TypeError, "Header must be size two tuples");
-        throw std::runtime_error {"Python tuple error"};
-      }
-
-      if(PyTuple_GET_SIZE(tuple) != 2) [[unlikely]] {
-        PyErr_SetString(PyExc_ValueError, "Header tuple must be size two");
-        throw std::runtime_error {"Python tuple error"};
-      }
-
-      PyObject* field {PyTuple_GET_ITEM(tuple, 0)};
-      if(!validate_and_insert_header(buf, field))
-        continue;
-      insert_literal(buf, ": ");
-
-      PyObject* value {PyTuple_GET_ITEM(tuple, 1)};
-      insert_pystr(buf, value, "Header values must be str objects");
-      insert_literal(buf, "\r\n");
-    }
-  }
-
-  void build_body(std::vector<char>& buf, PyObject* iter) {
-    std::size_t bodysize;
-    if(PyBytes_Check(iter))
-      bodysize = (std::size_t) PyBytes_GET_SIZE(iter);
-    else if(PyList_Check(iter))
-      bodysize = get_body_list_size(iter);
-    else if(PyTuple_Check(iter))
-      bodysize = get_body_tuple_size(iter);
-    else
-      bodysize = 0; // ToDO
-
-    insert_literal(buf, "Content-Length: ");
-    insert_str(buf, std::to_string(bodysize));
-    insert_literal(buf, "\r\n\r\n");
-
-    if(PyBytes_Check(iter)) {
-      insert_chars(buf, PyBytes_AS_STRING(iter), bodysize);
-    } else if(PyList_Check(iter)) {
-      Py_ssize_t listlen {PyList_GET_SIZE(iter)};
-      for(Py_ssize_t i {0}; i < listlen; ++i)
-        insert_pybytes_unchecked(buf, PyList_GET_ITEM(iter, i));
-    } else if(PyTuple_Check(iter)) {
-      Py_ssize_t listlen {PyTuple_GET_SIZE(iter)};
-      for(Py_ssize_t i {0}; i < listlen; ++i)
-        insert_pybytes_unchecked(buf, PyTuple_GET_ITEM(iter, i));
-    } else {
-      // TODO: iterable obj
-    }
+    for(Py_ssize_t i {0}, end {PyList_GET_SIZE(headers_)}; i < end; ++i)
+      insert_header(buf, PyList_GET_ITEM(headers_, i));
   }
 
   PyObject* start_response(PyObject* const* args, Py_ssize_t nargs,
