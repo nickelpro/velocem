@@ -3,8 +3,8 @@
 
 #include <chrono>
 #include <cstdlib>
-#include <exception>
 #include <optional>
+#include <stdexcept>
 #include <vector>
 
 #define PY_SSIZE_T_CLEAN
@@ -15,6 +15,22 @@
 #include "Util.hpp"
 
 namespace velocem {
+
+static bool validate_and_insert_header(std::vector<char>& buf, PyObject* str) {
+  const char* base;
+  Py_ssize_t len;
+  unpack_unicode(str, &base, &len, "Header fields must be str objects");
+
+  if((len == 4 && !strncmp("Date", base, 4)) ||
+      (len == 6 && !strncmp("Server", base, 6)) ||
+      (len == 10 && !strncmp("Connection", base, 10)) ||
+      (len == 14 && !strncmp("Content-Length", base, 14))) [[unlikely]] {
+    return false;
+  }
+
+  buf.insert(buf.end(), base, base + len);
+  return true;
+}
 
 struct PythonApp {
   PythonApp(PyObject* app, const char* host, const char* port)
@@ -66,7 +82,7 @@ struct PythonApp {
   std::optional<std::vector<char>> run(Request* req, int http_minor, int meth,
       bool keepalive) {
     std::vector<char> buf;
-    buf.reserve(1024); // Nice round numbersgmtime
+    buf.reserve(1024); // Nice round numbers
 
     auto env {make_env(req, http_minor, meth)};
     PyObject* iter {nullptr};
@@ -131,7 +147,7 @@ struct PythonApp {
 
   void build_headers(std::vector<char>& buf, bool keep_alive) {
     insert_literal(buf, "HTTP/1.1 ");
-    insert_pystr(buf, status_);
+    insert_pystr(buf, status_, "Status must be str object");
     insert_literal(buf, "\r\n");
     insert_str(buf, gRequiredHeaders);
     if(keep_alive)
@@ -139,20 +155,31 @@ struct PythonApp {
     else
       insert_literal(buf, "Connection: close\r\n");
 
-    Py_ssize_t listlen {PyList_Size(headers_)};
-    if(listlen < 0)
+    if(!PyList_Check(headers_)) [[unlikely]] {
+      PyErr_SetString(PyExc_TypeError, "Headers must be list");
       throw std::runtime_error {"Python list error"};
+    }
 
-    for(Py_ssize_t i {0}; i < listlen; ++i) {
+    for(Py_ssize_t i {0}, end {PyList_GET_SIZE(headers_)}; i < end; ++i) {
       PyObject* tuple {PyList_GET_ITEM(headers_, i)};
 
+      if(!PyTuple_Check(tuple)) [[unlikely]] {
+        PyErr_SetString(PyExc_TypeError, "Header must be size two tuples");
+        throw std::runtime_error {"Python tuple error"};
+      }
+
+      if(PyTuple_GET_SIZE(tuple) != 2) [[unlikely]] {
+        PyErr_SetString(PyExc_ValueError, "Header tuple must be size two");
+        throw std::runtime_error {"Python tuple error"};
+      }
+
       PyObject* field {PyTuple_GET_ITEM(tuple, 0)};
-      insert_pystr(buf, field);
+      if(!validate_and_insert_header(buf, field))
+        continue;
       insert_literal(buf, ": ");
 
-
       PyObject* value {PyTuple_GET_ITEM(tuple, 1)};
-      insert_pystr(buf, value);
+      insert_pystr(buf, value, "Header values must be str objects");
       insert_literal(buf, "\r\n");
     }
   }

@@ -1,6 +1,6 @@
 [![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/nickelpro/velocem/main.yaml?style=for-the-badge)](https://github.com/nickelpro/velocem/actions/workflows/main.yaml)
 [![Gunicorn](https://img.shields.io/badge/Faster%20Than%20Gunicorn-1418%25-08824c?style=for-the-badge)](https://github.com/benoitc/gunicorn)
-[![FastWSGI](https://img.shields.io/badge/Faster%20Than%20FastWSGI-5.15%25-lightblue?style=for-the-badge)](https://github.com/jamesroberts/fastwsgi)
+[![FastWSGI](https://img.shields.io/badge/Faster%20Than%20FastWSGI-4.68%25-lightblue?style=for-the-badge)](https://github.com/jamesroberts/fastwsgi)
 
 # Velocem
 
