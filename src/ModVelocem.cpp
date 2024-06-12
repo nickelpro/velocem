@@ -25,19 +25,6 @@ namespace this_coro = asio::this_coro;
 
 namespace velocem {
 
-asio::awaitable<void> timer_header_update(asio::steady_timer& timer) {
-
-  static std::chrono::seconds interval {1};
-
-  for(;;) {
-    timer.expires_from_now(interval);
-    co_await timer.async_wait(deferred);
-    gRequiredHeaders = std::format(gRequiredHeadersFormat,
-        std::chrono::floor<std::chrono::seconds>(
-            std::chrono::system_clock::now()));
-  }
-}
-
 asio::awaitable<void> client(tcp::socket s, PythonApp& app) {
   Request* req {new Request};
   Request* next_req {nullptr};
@@ -120,6 +107,42 @@ void accept(asio::execution::executor auto ex, std::string_view host,
   }
 }
 
+asio::awaitable<void> handle_header(asio::io_context& io) {
+  static std::chrono::seconds interval {1};
+
+  asio::steady_timer timer {io};
+
+  for(;;) {
+    timer.expires_from_now(interval);
+    co_await timer.async_wait(deferred);
+    gRequiredHeaders = std::format(gRequiredHeadersFormat,
+        std::chrono::floor<std::chrono::seconds>(
+            std::chrono::system_clock::now()));
+  }
+}
+
+asio::awaitable<void> handle_signals(asio::io_context& io) {
+  auto old_sigint {std::signal(SIGINT, SIG_DFL)};
+  auto old_sigterm {std::signal(SIGTERM, SIG_DFL)};
+
+  asio::signal_set signals {io};
+  signals.add(SIGINT);
+  signals.add(SIGTERM);
+
+  for(;;) {
+    int sig {co_await signals.async_wait(deferred)};
+    PyErr_SetInterruptEx(sig);
+    if(PyErr_CheckSignals()) {
+      io.stop();
+      break;
+    }
+  }
+
+  signals.clear();
+  std::signal(SIGINT, old_sigint);
+  std::signal(SIGTERM, old_sigterm);
+}
+
 PyObject* run(PyObject*, PyObject* const* args, Py_ssize_t nargs,
     PyObject* kwnames) {
   static const char* keywords[] {"app", "host", "port", nullptr};
@@ -135,27 +158,13 @@ PyObject* run(PyObject*, PyObject* const* args, Py_ssize_t nargs,
 
   Py_IncRef(appObj);
 
-  auto old_sigint {std::signal(SIGINT, SIG_DFL)};
-
   asio::io_context io {1};
-
-  asio::signal_set signals {io, SIGINT};
-  signals.async_wait([&](auto, auto) {
-    PyErr_SetInterrupt();
-    io.stop();
-  });
-
-  asio::steady_timer systimer {io};
-  asio::co_spawn(io, timer_header_update(systimer), detached);
+  asio::co_spawn(io, handle_signals(io), detached);
+  asio::co_spawn(io, handle_header(io), detached);
 
   PythonApp app {appObj, host, port};
   accept(io.get_executor(), host, port, app);
-
   io.run();
-
-  signals.cancel();
-  signals.clear();
-  std::signal(SIGINT, old_sigint);
 
   Py_DecRef(appObj);
   Py_RETURN_NONE;

@@ -2,7 +2,7 @@
 .venv/
 build/
 callgrind/
-test/
+sandbox/
 dist/
 bm/
 requirements.txt

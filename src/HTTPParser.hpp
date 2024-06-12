@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstring>
 #include <span>
+#include <stdexcept>
 #include <string_view>
 #include <utility>
 
@@ -44,6 +45,9 @@ struct HTTPParser : llhttp_t {
   }
 
   llhttp_errno_t parse(char* data, size_t len) {
+    auto ret {llhttp_execute(static_cast<llhttp_t*>(this), data, len)};
+    if(ret != HPE_OK && ret != HPE_PAUSED)
+      throw std::runtime_error {"HTTP error"};
     return llhttp_execute(static_cast<llhttp_t*>(this), data, len);
   }
 
