@@ -167,7 +167,9 @@ PyObject* run(PyObject*, PyObject* const* args, Py_ssize_t nargs,
   io.run();
 
   Py_DecRef(appObj);
-  Py_RETURN_NONE;
+
+  // There is no way to exit the run loop that isn't via an exception being set
+  return nullptr;
 }
 
 } // namespace velocem

@@ -21,10 +21,10 @@ static bool insert_field(std::vector<char>& buf, PyObject* str) {
   Py_ssize_t len;
   unpack_unicode(str, &base, &len, "Header fields must be str objects");
 
-  if((len == 4 && !strncmp("Date", base, 4)) ||
-      (len == 6 && !strncmp("Server", base, 6)) ||
-      (len == 10 && !strncmp("Connection", base, 10)) ||
-      (len == 14 && !strncmp("Content-Length", base, 14))) [[unlikely]] {
+  if((len == 4 && !strncasecmp("Date", base, 4)) ||
+      (len == 6 && !strncasecmp("Server", base, 6)) ||
+      (len == 10 && !strncasecmp("Connection", base, 10)) ||
+      (len == 14 && !strncasecmp("Content-Length", base, 14))) [[unlikely]] {
     return false;
   }
 

@@ -11,7 +11,7 @@
 
 #ifdef _MSC_VER
 #include <string.h>
-#define strncasecmp PyOS_strnicmp
+#define strncasecmp _strnicmp
 #else
 #include <strings.h>
 #endif
