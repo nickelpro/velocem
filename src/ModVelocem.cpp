@@ -64,7 +64,7 @@ asio::awaitable<void> client(tcp::socket s, PythonApp& app) {
             asio::buffer("HTTP/1.1 500 Internal Server Error\r\n\r\n", 38),
             deferred);
       } else {
-        co_await s.async_send(asio::buffer(*appret), deferred);
+        co_await s.async_send(asio::buffer(appret->buf), deferred);
       }
 
       if(!http.keep_alive() || !appret) {

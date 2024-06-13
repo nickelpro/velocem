@@ -57,6 +57,16 @@ inline void insert_pybytes_unchecked(std::vector<char>& vec, PyObject* bytes) {
   vec.insert(vec.end(), base, base + len);
 }
 
+inline Py_ssize_t insert_pybytes_unchecked(std::vector<char>& vec,
+    PyObject* bytes, Py_ssize_t max) {
+  char* base {PyBytes_AS_STRING(bytes)};
+  Py_ssize_t len {PyBytes_GET_SIZE(bytes)};
+  if(len > max)
+    len = max;
+  vec.insert(vec.end(), base, base + len);
+  return len;
+}
+
 inline std::size_t get_body_list_size(PyObject* list) {
   std::size_t sz {0};
   Py_ssize_t listlen {PyList_GET_SIZE(list)};
