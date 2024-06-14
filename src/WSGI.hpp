@@ -29,6 +29,7 @@ static InsertFieldResult insert_field(std::vector<char>& buf, PyObject* str) {
   unpack_unicode(str, &base, &len, "Header fields must be str objects");
 
   if(len == 14 && !strncasecmp("Content-Length", base, 17)) [[unlikely]] {
+    buf.insert(buf.end(), base, base + len);
     return CONLEN;
   }
 
@@ -60,6 +61,8 @@ std::optional<Py_ssize_t> insert_header(std::vector<char>& buf,
   if(result == NO_INSERT) [[unlikely]]
     return {};
 
+  insert_literal(buf, ": ");
+
   PyObject* value {PyTuple_GET_ITEM(tuple, 1)};
 
   if(result == CONLEN) [[unlikely]] {
@@ -68,15 +71,16 @@ std::optional<Py_ssize_t> insert_header(std::vector<char>& buf,
     unpack_unicode(value, &base, &len, "Header value must be str objects");
 
     Py_ssize_t conlen;
-    auto result {std::from_chars(base, base + len, conlen)};
-    if(result.ec != std::errc {}) {
+    auto fc {std::from_chars(base, base + len, conlen)};
+    if(fc.ec != std::errc {}) {
       PyErr_SetString(PyExc_ValueError, "Invalid Content-Length header");
       throw std::runtime_error {"Python header error"};
     }
+    insert_chars(buf, base, len);
+    insert_literal(buf, "\r\n");
     return conlen;
   }
 
-  insert_literal(buf, ": ");
   insert_pystr(buf, value, "Header values must be str objects");
   insert_literal(buf, "\r\n");
   return {};
@@ -84,8 +88,7 @@ std::optional<Py_ssize_t> insert_header(std::vector<char>& buf,
 
 static void insert_body_pybytes(std::vector<char>& buf, PyObject* iter,
     Py_ssize_t sz) {
-  insert_str(buf, std::format("Content-Length: {}\r\n\r\n", sz));
-  if(PyBytes_GET_SIZE(iter) > sz) {
+  if(PyBytes_GET_SIZE(iter) < sz) {
     PyErr_SetString(PyExc_ValueError,
         "Response is shorter than provided Content-Length header");
     throw std::runtime_error("Python header error");
@@ -101,7 +104,6 @@ static void insert_body_pybytes(std::vector<char>& buf, PyObject* iter) {
 
 static void insert_body_pylist(std::vector<char>& buf, PyObject* iter,
     Py_ssize_t sz) {
-  insert_str(buf, std::format("Content-Length: {}\r\n\r\n", sz));
   for(Py_ssize_t i {0}, end {PyList_GET_SIZE(iter)}; i < end && sz; ++i)
     sz -= insert_pybytes_unchecked(buf, PyList_GET_ITEM(iter, i), sz);
 
@@ -121,7 +123,6 @@ static void insert_body_pylist(std::vector<char>& buf, PyObject* iter) {
 
 static void insert_body_pytuple(std::vector<char>& buf, PyObject* iter,
     Py_ssize_t sz) {
-  insert_str(buf, std::format("Content-Length: {}\r\n\r\n", sz));
   for(Py_ssize_t i {0}, end {PyTuple_GET_SIZE(iter)}; i < end && sz; ++i)
     sz -= insert_pybytes_unchecked(buf, PyTuple_GET_ITEM(iter, i), sz);
 
@@ -139,16 +140,83 @@ static void insert_body_pytuple(std::vector<char>& buf, PyObject* iter) {
     insert_pybytes_unchecked(buf, PyTuple_GET_ITEM(iter, i));
 }
 
+static PyObject* insert_body_iter(std::vector<char>& buf, PyObject* iter) {
+  PyObject* first {PyIter_Next(iter)};
+  if(!first) {
+    if(PyErr_Occurred())
+      throw std::runtime_error {"Python iterator error"};
+    insert_literal(buf, "Content-Length: 0\r\n\r\n");
+    return nullptr;
+  }
+
+  PyObject* second {PyIter_Next(iter)};
+  if(!second) {
+    if(PyErr_Occurred())
+      throw std::runtime_error {"Python iterator error"};
+
+    const char* bytes;
+    Py_ssize_t len;
+    unpack_pybytes(first, &bytes, &len, "Response iterator must yield bytes");
+
+    insert_str(buf, std::format("Content-Length: {}\r\n\r\n", len));
+    insert_chars(buf, bytes, len);
+    return nullptr;
+  }
+
+  insert_literal(buf, "Transfer-Encoding: chunked\r\n\r\n");
+
+  const char* bytes;
+  Py_ssize_t len;
+  unpack_pybytes(first, &bytes, &len, "Response iterator must yield bytes");
+
+  const char* bytes2;
+  Py_ssize_t len2;
+  unpack_pybytes(second, &bytes2, &len2, "Response iterator must yield bytes");
+
+  insert_str(buf, std::format("{:x}\r\n", len + len2));
+  insert_chars(buf, bytes, len);
+  insert_chars(buf, bytes2, len2);
+  insert_literal(buf, "\r\n");
+  return iter;
+}
+
+static void insert_body_iter(std::vector<char>& buf, PyObject* iter,
+    Py_ssize_t sz) {
+  PyObject* next {nullptr};
+  try {
+    while((next = PyIter_Next(iter)) && sz) {
+      sz -= insert_pybytes(buf, next, sz, "Iterator must yield bytes object");
+      Py_DECREF(next);
+    }
+  } catch(...) {
+    Py_DECREF(next);
+    throw;
+  }
+
+  if(PyErr_Occurred())
+    throw std::runtime_error {"Python iterator error"};
+
+  if(sz) {
+    PyErr_SetString(PyExc_ValueError,
+        "Response is shorter than provided Content-Length header");
+    throw std::runtime_error("Python header error");
+  }
+}
+
 static PyObject* build_body(std::vector<char>& buf, PyObject* iter,
     Py_ssize_t conlen) {
+  insert_literal(buf, "\r\n");
+
   if(PyBytes_Check(iter)) {
     insert_body_pybytes(buf, iter, conlen);
   } else if(PyList_Check(iter)) {
     insert_body_pylist(buf, iter, conlen);
   } else if(PyTuple_Check(iter)) {
     insert_body_pytuple(buf, iter, conlen);
+  } else if(PySequence_Check(iter)) {
+    throw std::runtime_error {"Unimplemented"};
   } else if(PyIter_Check(iter)) {
-    return iter;
+    insert_body_iter(buf, iter, conlen);
   } else {
     PyErr_SetString(PyExc_TypeError, "WSGI App must return iterable");
     throw std::runtime_error {"Python iter error"};
@@ -163,8 +231,10 @@ static PyObject* build_body(std::vector<char>& buf, PyObject* iter) {
     insert_body_pylist(buf, iter);
   } else if(PyTuple_Check(iter)) {
     insert_body_pytuple(buf, iter);
+  } else if(PySequence_Check(iter)) {
+    throw std::runtime_error {"Unimplemented"};
   } else if(PyIter_Check(iter)) {
-    return iter;
+    return insert_body_iter(buf, iter);
   } else {
     PyErr_SetString(PyExc_TypeError, "WSGI App must return iterable");
     throw std::runtime_error {"Python iter error"};
@@ -175,8 +245,6 @@ static PyObject* build_body(std::vector<char>& buf, PyObject* iter) {
 struct PyAppRet {
   std::vector<char> buf;
   PyObject* iter {nullptr};
-  PyObject* status;
-  PyObject* headers;
   std::optional<Py_ssize_t> conlen;
 };
 
@@ -251,30 +319,32 @@ struct PythonApp {
       if(!iter) [[unlikely]]
         throw std::runtime_error {"Python function call error"};
 
-      ret.conlen = build_headers(ret.buf, keepalive);
-      if(!ret.conlen) [[likely]]
-        ret.iter = build_body(ret.buf, iter);
-      else
-        ret.iter = build_body(ret.buf, iter, *ret.conlen);
+
+      if(PyGen_Check(iter)) {
+        throw std::runtime_error {"Unimplemented"};
+      } else {
+        ret.conlen = build_headers(ret.buf, keepalive);
+        if(!ret.conlen) [[likely]]
+          ret.iter = build_body(ret.buf, iter);
+        else
+          ret.iter = build_body(ret.buf, iter, *ret.conlen);
+      }
+
 
     } catch(...) {
       PyErr_Print();
       PyErr_Clear();
 
+      Py_XDECREF(iter);
       Py_XDECREF(status_);
       Py_XDECREF(headers_);
-      Py_XDECREF(iter);
       return {};
     }
 
-    if(!ret.iter) {
+    if(!ret.iter)
       Py_DECREF(iter);
-      Py_DECREF(status_);
-      Py_DECREF(headers_);
-    } else {
-      ret.status = status_;
-      ret.headers = headers_;
-    }
+    Py_DECREF(status_);
+    Py_DECREF(headers_);
     return ret;
   }
 
@@ -324,6 +394,7 @@ struct PythonApp {
       auto result {insert_header(buf, PyList_GET_ITEM(headers_, i))};
       if(result) {
         ret = result;
+        ++i;
         break;
       }
     }

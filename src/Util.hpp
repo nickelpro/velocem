@@ -86,6 +86,15 @@ inline void insert_pybytes(std::vector<char>& vec, PyObject* bytes,
   insert_pybytes_unchecked(vec, bytes);
 }
 
+inline Py_ssize_t insert_pybytes(std::vector<char>& vec, PyObject* bytes,
+    Py_ssize_t max, const char* err) {
+  if(!PyBytes_Check(bytes)) [[unlikely]] {
+    PyErr_SetString(PyExc_TypeError, err);
+    throw std::runtime_error {"Python bytes object error"};
+  }
+  return insert_pybytes_unchecked(vec, bytes, max);
+}
+
 inline void insert_pystr(std::vector<char>& vec, PyObject* str,
     const char* err) {
   const char* base;

@@ -25,22 +25,15 @@ using asio::ip::tcp;
 namespace this_coro = asio::this_coro;
 
 namespace velocem {
-
-static void decref_app(PyAppRet& app) {
-  Py_DECREF(app.iter);
-  Py_DECREF(app.status);
-  Py_DECREF(app.headers);
-}
-
 asio::awaitable<void> handle_iter(tcp::socket& s, PyAppRet& app) {
-
-  insert_literal(app.buf, "Transfer-Encoding: chunked\r\n\r\n");
+  co_await s.async_send(asio::buffer(app.buf), deferred);
 
   for(PyObject* next; (next = PyIter_Next(app.iter));) {
     try {
+      app.buf.clear();
+
       const char* base;
       Py_ssize_t len;
-
       unpack_pybytes(next, &base, &len,
           "Body iterator must produce bytes objects");
 
@@ -52,14 +45,13 @@ asio::awaitable<void> handle_iter(tcp::socket& s, PyAppRet& app) {
       }
 
       Py_DECREF(next);
-      app.buf.clear();
     } catch(...) {
       Py_DECREF(next);
-      decref_app(app);
+      Py_DECREF(app.iter);
       throw;
     }
   }
-  decref_app(app);
+  Py_DECREF(app.iter);
 
   if(PyErr_Occurred()) {
     PyErr_Print();
