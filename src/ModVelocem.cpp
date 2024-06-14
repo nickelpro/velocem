@@ -2,6 +2,7 @@
 #include <chrono>
 #include <csignal>
 #include <exception>
+#include <format>
 #include <optional>
 #include <ranges>
 #include <string_view>
@@ -24,6 +25,50 @@ using asio::ip::tcp;
 namespace this_coro = asio::this_coro;
 
 namespace velocem {
+
+static void decref_app(PyAppRet& app) {
+  Py_DECREF(app.iter);
+  Py_DECREF(app.status);
+  Py_DECREF(app.headers);
+}
+
+asio::awaitable<void> handle_iter(tcp::socket& s, PyAppRet& app) {
+
+  insert_literal(app.buf, "Transfer-Encoding: chunked\r\n\r\n");
+
+  for(PyObject* next; (next = PyIter_Next(app.iter));) {
+    try {
+      const char* base;
+      Py_ssize_t len;
+
+      unpack_pybytes(next, &base, &len,
+          "Body iterator must produce bytes objects");
+
+      if(len) [[likely]] {
+        insert_str(app.buf, std::format("{:x}\r\n", len));
+        insert_chars(app.buf, base, len);
+        insert_literal(app.buf, "\r\n");
+        co_await s.async_send(asio::buffer(app.buf), deferred);
+      }
+
+      Py_DECREF(next);
+      app.buf.clear();
+    } catch(...) {
+      Py_DECREF(next);
+      decref_app(app);
+      throw;
+    }
+  }
+  decref_app(app);
+
+  if(PyErr_Occurred()) {
+    PyErr_Print();
+    PyErr_Clear();
+    throw std::runtime_error {"Python iterator error"};
+  }
+
+  co_await s.async_send(buffer_literal("0\r\n\r\n"), deferred);
+}
 
 asio::awaitable<void> client(tcp::socket s, PythonApp& app) {
   Request* req {new Request};
@@ -55,19 +100,22 @@ asio::awaitable<void> client(tcp::socket s, PythonApp& app) {
         std::memcpy(next_req->buf.data(), rm.data(), rm.size());
       }
 
-      auto appret {
-          app.run(req, http.http_minor, http.method, http.keep_alive())};
+      auto res {app.run(req, http.http_minor, http.method, http.keep_alive())};
       req = nullptr;
 
-      if(!appret) {
-        co_await s.async_send(
-            asio::buffer("HTTP/1.1 500 Internal Server Error\r\n\r\n", 38),
-            deferred);
+      if(res) [[likely]] {
+        if(!res->iter) {
+          co_await s.async_send(asio::buffer(res->buf), deferred);
+        } else {
+          co_await handle_iter(s, *res);
+        }
       } else {
-        co_await s.async_send(asio::buffer(appret->buf), deferred);
+        co_await s.async_send(
+            buffer_literal("HTTP/1.1 500 Internal Server Error\r\n\r\n"),
+            deferred);
       }
 
-      if(!http.keep_alive() || !appret) {
+      if(!http.keep_alive() || !res) {
         asio::error_code ec;
         s.shutdown(s.shutdown_both, ec);
         s.close(ec);
