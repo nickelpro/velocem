@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.24)
+cmake_minimum_required(VERSION 3.25)
 
 if(NOT SKIP_VCPKG AND NOT DEFINED CMAKE_TOOLCHAIN_FILE)
   include(FetchContent)
@@ -35,6 +35,16 @@ set_target_properties(velocem PROPERTIES CXX_VISIBILITY_PRESET hidden)
 
 if(WIN32)
   target_compile_definitions(velocem PRIVATE _WIN32_WINDOWS=0x0A00)
+endif()
+
+option(VELOCEM_USE_IO_URING "Use io_uring on Linux" OFF)
+
+if(LINUX AND VELOCEM_USE_IO_URING)
+  target_compile_definitions(velocem PRIVATE
+    ASIO_DISABLE_EPOLL
+    ASIO_HAS_IO_URING
+  )
+  target_link_libraries(velocem PRIVATE uring)
 endif()
 
 if(CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL GNU)

@@ -35,6 +35,9 @@ config = "Release"
 build_type = "Release"
 build_args = ["-j"]
 
+[tool.py-build-cmake.linux.cmake.options]
+"VELOCEM_USE_IO_URING:BOOL" = "ON"
+
 [tool.py-build-cmake.mac.cmake.options]
 "CMAKE_OSX_DEPLOYMENT_TARGET:STRING" = "13.3"
 
