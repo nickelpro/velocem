@@ -141,6 +141,15 @@ inline void replace_key(PyObject* dict, PyObject* oldK, PyObject* newK) {
   }
 }
 
+inline void close_iterator(PyObject* iter) {
+  PyObject* close {PyObject_GetAttrString(iter, "close")};
+  if(close) {
+    PyObject* ret {PyObject_CallNoArgs(close)};
+    Py_XDECREF(ret);
+    Py_DECREF(close);
+  }
+}
+
 } // namespace velocem
 
 #endif

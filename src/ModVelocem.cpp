@@ -46,11 +46,14 @@ asio::awaitable<void> handle_iter(tcp::socket& s, PyAppRet& app) {
 
       Py_DECREF(next);
     } catch(...) {
+      close_iterator(app.iter);
       Py_DECREF(next);
       Py_DECREF(app.iter);
       throw;
     }
   }
+
+  close_iterator(app.iter);
   Py_DECREF(app.iter);
 
   if(PyErr_Occurred()) {

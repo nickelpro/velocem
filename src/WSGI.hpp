@@ -143,6 +143,7 @@ static void insert_body_pytuple(std::vector<char>& buf, PyObject* iter) {
 static PyObject* insert_body_iter(std::vector<char>& buf, PyObject* iter) {
   PyObject* first {PyIter_Next(iter)};
   if(!first) {
+    close_iterator(iter);
     if(PyErr_Occurred())
       throw std::runtime_error {"Python iterator error"};
     insert_literal(buf, "Content-Length: 0\r\n\r\n");
@@ -151,6 +152,7 @@ static PyObject* insert_body_iter(std::vector<char>& buf, PyObject* iter) {
 
   PyObject* second {PyIter_Next(iter)};
   if(!second) {
+    close_iterator(iter);
     if(PyErr_Occurred())
       throw std::runtime_error {"Python iterator error"};
 
@@ -189,9 +191,12 @@ static void insert_body_iter(std::vector<char>& buf, PyObject* iter,
       Py_DECREF(next);
     }
   } catch(...) {
+    close_iterator(iter);
     Py_DECREF(next);
     throw;
   }
+
+  close_iterator(iter);
 
   if(PyErr_Occurred())
     throw std::runtime_error {"Python iterator error"};
