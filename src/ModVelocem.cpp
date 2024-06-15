@@ -15,6 +15,7 @@
 #include <asio.hpp>
 
 #include "HTTPParser.hpp"
+#include "plat/plat.hpp"
 #include "Request.hpp"
 #include "WSGI.hpp"
 
@@ -130,9 +131,14 @@ asio::awaitable<void> client(tcp::socket s, PythonApp& app) {
     delete next_req;
 }
 
-asio::awaitable<void> listener(tcp::endpoint ep, auto& app) {
+asio::awaitable<void> listener(tcp::endpoint ep, int reuseport, auto& app) {
   auto executor {co_await asio::this_coro::executor};
-  tcp::acceptor acceptor {executor, ep};
+  tcp::acceptor acceptor {executor};
+  acceptor.open(ep.protocol());
+  if(reuseport)
+    set_reuse_port(acceptor);
+  acceptor.bind(ep);
+  acceptor.listen();
 
   for(;;) {
     tcp::socket socket {co_await acceptor.async_accept(deferred)};
@@ -141,12 +147,12 @@ asio::awaitable<void> listener(tcp::endpoint ep, auto& app) {
 }
 
 void accept(asio::execution::executor auto ex, std::string_view host,
-    std::string_view port, auto& app) {
+    std::string_view port, int reuseport, auto& app) {
   for(auto re : tcp::resolver {ex}.resolve(host, port)) {
     auto ep {re.endpoint()};
     PySys_WriteStdout("Listening on: http://%s:%s\n",
         ep.address().to_string().c_str(), std::to_string(ep.port()).c_str());
-    asio::co_spawn(ex, listener(std::move(ep), app), detached);
+    asio::co_spawn(ex, listener(std::move(ep), reuseport, app), detached);
   }
 }
 
@@ -188,15 +194,16 @@ asio::awaitable<void> handle_signals(asio::io_context& io) {
 
 PyObject* run(PyObject*, PyObject* const* args, Py_ssize_t nargs,
     PyObject* kwnames) {
-  static const char* keywords[] {"app", "host", "port", nullptr};
-  static _PyArg_Parser parser {.format = "O|ss:run", .keywords = keywords};
+  static const char* keywords[] {"app", "host", "port", "reuseport", nullptr};
+  static _PyArg_Parser parser {.format = "O|ssp:run", .keywords = keywords};
 
   PyObject* appObj;
   const char* host {"localhost"};
   const char* port {"8000"};
+  int reuseport {0};
 
   if(!_PyArg_ParseStackAndKeywords(args, nargs, kwnames, &parser, &appObj,
-         &host, &port))
+         &host, &port, &reuseport))
     return nullptr;
 
   Py_IncRef(appObj);
@@ -206,7 +213,7 @@ PyObject* run(PyObject*, PyObject* const* args, Py_ssize_t nargs,
   asio::co_spawn(io, handle_header(io), detached);
 
   PythonApp app {appObj, host, port};
-  accept(io.get_executor(), host, port, app);
+  accept(io.get_executor(), host, port, reuseport, app);
   io.run();
 
   Py_DecRef(appObj);
