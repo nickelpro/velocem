@@ -140,16 +140,8 @@ static void insert_body_pytuple(std::vector<char>& buf, PyObject* iter) {
     insert_pybytes_unchecked(buf, PyTuple_GET_ITEM(iter, i));
 }
 
-static PyObject* insert_body_iter(std::vector<char>& buf, PyObject* iter) {
-  PyObject* first {PyIter_Next(iter)};
-  if(!first) {
-    close_iterator(iter);
-    if(PyErr_Occurred())
-      throw std::runtime_error {"Python iterator error"};
-    insert_literal(buf, "Content-Length: 0\r\n\r\n");
-    return nullptr;
-  }
-
+static PyObject* insert_body_iter_common(std::vector<char>& buf, PyObject* iter,
+    PyObject* first) {
   PyObject* second {PyIter_Next(iter)};
   if(!second) {
     close_iterator(iter);
@@ -162,6 +154,7 @@ static PyObject* insert_body_iter(std::vector<char>& buf, PyObject* iter) {
 
     insert_str(buf, std::format("Content-Length: {}\r\n\r\n", len));
     insert_chars(buf, bytes, len);
+    Py_DECREF(first);
     return nullptr;
   }
 
@@ -179,7 +172,22 @@ static PyObject* insert_body_iter(std::vector<char>& buf, PyObject* iter) {
   insert_chars(buf, bytes, len);
   insert_chars(buf, bytes2, len2);
   insert_literal(buf, "\r\n");
+  Py_DECREF(first);
+  Py_DECREF(second);
   return iter;
+}
+
+static PyObject* insert_body_iter(std::vector<char>& buf, PyObject* iter) {
+  PyObject* first {PyIter_Next(iter)};
+  if(!first) {
+    close_iterator(iter);
+    if(PyErr_Occurred())
+      throw std::runtime_error {"Python iterator error"};
+    insert_literal(buf, "Content-Length: 0\r\n\r\n");
+    return nullptr;
+  }
+
+  return insert_body_iter_common(buf, iter, first);
 }
 
 static void insert_body_iter(std::vector<char>& buf, PyObject* iter,
@@ -191,8 +199,8 @@ static void insert_body_iter(std::vector<char>& buf, PyObject* iter,
       Py_DECREF(next);
     }
   } catch(...) {
-    close_iterator(iter);
     Py_DECREF(next);
+    close_iterator(iter);
     throw;
   }
 
@@ -208,7 +216,55 @@ static void insert_body_iter(std::vector<char>& buf, PyObject* iter,
   }
 }
 
-static PyObject* build_body(std::vector<char>& buf, PyObject* iter,
+static PyObject* prime_generator(PyObject* iter) {
+  PyObject* next {PyIter_Next(iter)};
+  if(!next) {
+    close_iterator(iter);
+    if(PyErr_Occurred())
+      throw std::runtime_error {"Python iterator error"};
+  }
+  return next;
+}
+
+static PyObject* insert_body_generator(std::vector<char>& buf, PyObject* iter,
+    PyObject* first) {
+  if(!first) {
+    insert_literal(buf, "Content-Length: 0\r\n\r\n");
+    return nullptr;
+  }
+  return insert_body_iter_common(buf, iter, first);
+}
+
+static void insert_body_generator(std::vector<char>& buf, PyObject* iter,
+    PyObject* first, Py_ssize_t sz) {
+
+  if(!sz) {
+    if(first) {
+      Py_DECREF(first);
+      close_iterator(iter);
+    }
+    return;
+  }
+
+  if(!first) {
+    PyErr_SetString(PyExc_ValueError,
+        "Response is shorter than provided Content-Length header");
+    throw std::runtime_error("Python header error");
+  }
+
+  try {
+    sz -= insert_pybytes(buf, first, sz, "Iterator must yield bytes object");
+  } catch(...) {
+    Py_DECREF(first);
+    throw;
+  }
+  Py_DECREF(first);
+
+  insert_body_iter(buf, iter, sz);
+}
+
+
+static void build_body(std::vector<char>& buf, PyObject* iter,
     Py_ssize_t conlen) {
   insert_literal(buf, "\r\n");
 
@@ -226,7 +282,6 @@ static PyObject* build_body(std::vector<char>& buf, PyObject* iter,
     PyErr_SetString(PyExc_TypeError, "WSGI App must return iterable");
     throw std::runtime_error {"Python iter error"};
   }
-  return nullptr;
 }
 
 static PyObject* build_body(std::vector<char>& buf, PyObject* iter) {
@@ -326,13 +381,18 @@ struct PythonApp {
 
 
       if(PyGen_Check(iter)) {
-        throw std::runtime_error {"Unimplemented"};
+        PyObject* first {prime_generator(iter)};
+        ret.conlen = build_headers(ret.buf, keepalive);
+        if(!ret.conlen)
+          ret.iter = insert_body_generator(ret.buf, iter, first);
+        else
+          insert_body_generator(ret.buf, iter, first, *ret.conlen);
       } else {
         ret.conlen = build_headers(ret.buf, keepalive);
-        if(!ret.conlen) [[likely]]
+        if(!ret.conlen)
           ret.iter = build_body(ret.buf, iter);
         else
-          ret.iter = build_body(ret.buf, iter, *ret.conlen);
+          build_body(ret.buf, iter, *ret.conlen);
       }
 
 

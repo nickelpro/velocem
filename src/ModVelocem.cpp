@@ -73,25 +73,24 @@ asio::awaitable<void> client(tcp::socket s, PythonApp& app) {
 
   try {
     for(;;) {
-      std::size_t offset {0};
+      std::size_t off {0};
 
       if(next_req) {
         std::swap(req, next_req);
         std::size_t n {req->buf.size()};
         http.resume(req, req->get_parse_buf(0, n));
-        offset += n;
+        off += n;
       }
 
       while(!http.done()) {
-        size_t n {
-            co_await s.async_read_some(req->get_read_buf(offset), deferred)};
-        http.parse(req->get_parse_buf(offset, n));
-        offset += n;
+        size_t n {co_await s.async_read_some(req->get_read_buf(off), deferred)};
+        http.parse(req->get_parse_buf(off, n));
+        off += n;
       }
 
       if(http.keep_alive()) {
         next_req = new Request;
-        auto rm {http.get_rem(offset)};
+        auto rm {http.get_rem(off)};
         next_req->buf.resize(rm.size());
         std::memcpy(next_req->buf.data(), rm.data(), rm.size());
       }
@@ -137,6 +136,8 @@ asio::awaitable<void> listener(tcp::endpoint ep, int reuseport, auto& app) {
   acceptor.open(ep.protocol());
   if(reuseport)
     set_reuse_port(acceptor);
+
+  acceptor.set_option(tcp::acceptor::reuse_address {true});
   acceptor.bind(ep);
   acceptor.listen();
 
