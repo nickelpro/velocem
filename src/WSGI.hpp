@@ -140,6 +140,19 @@ static void insert_body_pytuple(std::vector<char>& buf, PyObject* iter) {
     insert_pybytes_unchecked(buf, PyTuple_GET_ITEM(iter, i));
 }
 
+static void insert_body_pyseq(std::vector<char>& buf, PyObject* iter) {
+  PyObject* seq {PySequence_Tuple(iter)};
+  insert_body_pytuple(buf, seq);
+  Py_DECREF(seq);
+}
+
+static void insert_body_pyseq(std::vector<char>& buf, PyObject* iter,
+    Py_ssize_t sz) {
+  PyObject* seq {PySequence_Tuple(iter)};
+  insert_body_pytuple(buf, seq, sz);
+  Py_DECREF(seq);
+}
+
 static PyObject* insert_body_iter_common(std::vector<char>& buf, PyObject* iter,
     PyObject* first) {
   PyObject* second {PyIter_Next(iter)};
@@ -275,7 +288,7 @@ static void build_body(std::vector<char>& buf, PyObject* iter,
   } else if(PyTuple_Check(iter)) {
     insert_body_pytuple(buf, iter, conlen);
   } else if(PySequence_Check(iter)) {
-    throw std::runtime_error {"Unimplemented"};
+    insert_body_pyseq(buf, iter, conlen);
   } else if(PyIter_Check(iter)) {
     insert_body_iter(buf, iter, conlen);
   } else {
@@ -292,7 +305,7 @@ static PyObject* build_body(std::vector<char>& buf, PyObject* iter) {
   } else if(PyTuple_Check(iter)) {
     insert_body_pytuple(buf, iter);
   } else if(PySequence_Check(iter)) {
-    throw std::runtime_error {"Unimplemented"};
+    insert_body_pyseq(buf, iter);
   } else if(PyIter_Check(iter)) {
     return insert_body_iter(buf, iter);
   } else {
