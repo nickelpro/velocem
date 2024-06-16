@@ -242,7 +242,7 @@ PyMODINIT_FUNC PyInit_velocem(void) {
   auto mod {PyModule_Create(&VelocemModule)};
   if(!mod)
     return nullptr;
-  if(PyModule_AddStringConstant(mod, "__version__", "0.0.6") == -1)
+  if(PyModule_AddStringConstant(mod, "__version__", "0.0.7") == -1)
     return nullptr;
   return mod;
 }
