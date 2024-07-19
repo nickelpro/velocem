@@ -4,6 +4,7 @@
 #include <exception>
 #include <format>
 #include <optional>
+#include <queue>
 #include <ranges>
 #include <string_view>
 #include <utility>
@@ -26,6 +27,19 @@ using asio::ip::tcp;
 namespace this_coro = asio::this_coro;
 
 namespace velocem {
+
+struct {
+  std::queue<QueuedRequest*> q;
+
+  Request* pop() {
+    if(q.empty())
+      return static_cast<Request*>(new QueuedRequest(q));
+    auto ptr = q.front();
+    q.pop();
+    return static_cast<Request*>(ptr);
+  }
+} ReqQ;
+
 asio::awaitable<void> handle_iter(tcp::socket& s, PyAppRet& app) {
   co_await s.async_send(asio::buffer(app.buf), deferred);
 
@@ -67,7 +81,7 @@ asio::awaitable<void> handle_iter(tcp::socket& s, PyAppRet& app) {
 }
 
 asio::awaitable<void> client(tcp::socket s, PythonApp& app) {
-  Request* req {new Request};
+  Request* req {ReqQ.pop()};
   Request* next_req {nullptr};
   HTTPParser http {req};
 
@@ -77,7 +91,7 @@ asio::awaitable<void> client(tcp::socket s, PythonApp& app) {
 
       if(next_req) {
         std::swap(req, next_req);
-        std::size_t n {req->buf.size()};
+        std::size_t n {req->buf_.size()};
         http.resume(req, req->get_parse_buf(0, n));
         off += n;
       }
@@ -89,10 +103,10 @@ asio::awaitable<void> client(tcp::socket s, PythonApp& app) {
       }
 
       if(http.keep_alive()) {
-        next_req = new Request;
+        next_req = ReqQ.pop();
         auto rm {http.get_rem(off)};
-        next_req->buf.resize(rm.size());
-        std::memcpy(next_req->buf.data(), rm.data(), rm.size());
+        next_req->buf_.resize(rm.size());
+        std::memcpy(next_req->buf_.data(), rm.data(), rm.size());
       }
 
       auto res {app.run(req, http.http_minor, http.method, http.keep_alive())};

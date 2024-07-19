@@ -73,7 +73,7 @@ struct HTTPParser : llhttp_t {
 
   std::span<char> get_rem(std::size_t offset) {
     const char* endp = llhttp_get_error_pos(static_cast<llhttp_t*>(this));
-    const char* used = req_->buf.data() + offset;
+    const char* used = req_->buf_.data() + offset;
     size_t dist = used - endp;
     return {const_cast<char*>(endp), dist};
   }

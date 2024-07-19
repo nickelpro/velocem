@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <functional>
 #include <optional>
+#include <queue>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -55,15 +56,28 @@ struct Header {
 struct Request {
 
   Request() {
-    headers.reserve(32);
-    values.reserve(32);
+    headers_.reserve(32);
+    values_.reserve(32);
+  }
+
+  Request(std::function<void(BalmStringView*)> f_free) : f_free_ {f_free} {
+    headers_.reserve(32);
+    values_.reserve(32);
+  }
+
+  void reset() {
+    ref_count = 1;
+    query_.reset();
+    headers_.clear();
+    values_.clear();
+    buf_.clear();
   }
 
 
   std::size_t ref_count {1};
 
 
-  std::function<void(BalmStringView*)> f_free {[this](BalmStringView*) {
+  std::function<void(BalmStringView*)> f_free_ {[this](BalmStringView*) {
     if(!--ref_count)
       delete this;
   }};
@@ -80,7 +94,7 @@ struct Request {
     if(query_)
       return *query_;
     ref_count++;
-    return query_.emplace(f_free);
+    return query_.emplace(f_free_);
   }
 
 
@@ -95,16 +109,16 @@ struct Request {
 
   BalmStringView& next_header(char* base = nullptr, size_t len = 0) {
     ++ref_count;
-    return headers.emplace_back(f_free, base, len).bsv;
+    return headers_.emplace_back(f_free_, base, len).bsv;
   }
 
   BalmStringView& last_header() {
-    return headers.back().bsv;
+    return headers_.back().bsv;
   }
 
   bool process_header() {
-    if(!headers.back().process()) {
-      headers.pop_back();
+    if(!headers_.back().process()) {
+      headers_.pop_back();
       --ref_count;
       return false;
     }
@@ -113,31 +127,31 @@ struct Request {
 
   BalmStringView& next_value(char* base = nullptr, std::size_t len = 0) {
     ++ref_count;
-    return values.emplace_back(f_free, base, len);
+    return values_.emplace_back(f_free_, base, len);
   }
 
   BalmStringView& last_value() {
-    return values.back();
+    return values_.back();
   }
 
   auto get_read_buf(std::size_t offset, std::size_t minsize = 1024) {
-    std::size_t diff {buf.size() - offset};
+    std::size_t diff {buf_.size() - offset};
     if(diff < minsize)
-      buf.resize(buf.size() + 2 * minsize);
+      buf_.resize(buf_.size() + 2 * minsize);
 
-    return asio::buffer(buf.data() + offset, buf.size() - offset);
+    return asio::buffer(buf_.data() + offset, buf_.size() - offset);
   }
 
   auto get_parse_buf(std::size_t offset, std::size_t n) {
-    return asio::buffer(buf.data() + offset, n);
+    return asio::buffer(buf_.data() + offset, n);
   }
 
-  BalmStringView url_ {f_free};
+  BalmStringView url_ {f_free_};
   std::optional<BalmStringView> query_;
 
-  std::vector<Header> headers;
-  std::vector<BalmStringView> values;
-  std::vector<char> buf;
+  std::vector<Header> headers_;
+  std::vector<BalmStringView> values_;
+  std::vector<char> buf_;
 
 
 // Directly from bjoern
@@ -170,6 +184,16 @@ struct Request {
   }
 #undef NOHEX
 #undef UNHEX
+};
+
+struct QueuedRequest : Request {
+  QueuedRequest(std::queue<QueuedRequest*>& q)
+      : Request {[this, &q](BalmStringView*) {
+          if(!--ref_count) {
+            reset();
+            q.push(this);
+          }
+        }} {};
 };
 
 } // namespace velocem

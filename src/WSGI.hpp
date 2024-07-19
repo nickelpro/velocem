@@ -440,7 +440,7 @@ struct PythonApp {
 
     PyDict_SetItem(env, gPO.proto, http_minor ? gPO.http11 : gPO.http10);
 
-    for(const auto& [hdr, val] : std::views::zip(req->headers, req->values))
+    for(const auto& [hdr, val] : std::views::zip(req->headers_, req->values_))
       PyDict_SetItem(env, (PyObject*) &hdr.bsv, (PyObject*) &val);
 
     replace_key(env, gPO.http_conlen, gPO.conlen);
