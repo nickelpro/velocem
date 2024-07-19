@@ -17,14 +17,17 @@ if(WIN32)
   target_compile_definitions(velocem PRIVATE _WIN32_WINDOWS=0x0A00)
 endif()
 
-option(VELOCEM_USE_IO_URING "Use io_uring on Linux" OFF)
+option(VELOCEM_USE_IO_URING "Use io_uring on Linux" ON)
 
 if(LINUX AND VELOCEM_USE_IO_URING)
   target_compile_definitions(velocem PRIVATE
     ASIO_DISABLE_EPOLL
     ASIO_HAS_IO_URING
   )
-  target_link_libraries(velocem PRIVATE uring)
+
+  find_package(PkgConfig)
+  pkg_check_modules(liburing REQUIRED IMPORTED_TARGET liburing>=2.0)
+  target_link_libraries(velocem PRIVATE PkgConfig::liburing)
 endif()
 
 if(CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL GNU)

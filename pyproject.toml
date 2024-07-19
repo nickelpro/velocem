@@ -27,7 +27,7 @@ build-backend = "py_build_cmake.build"
 generated = "module"
 
 [tool.py-build-cmake.sdist]
-include = ["CMakeLists.txt", "vcpkg.json", "src"]
+include = ["CMakeLists.txt", "vcpkg.json", "cmake", "src"]
 
 [tool.py-build-cmake.cmake]
 minimum_version = "3.17"
@@ -37,6 +37,7 @@ build_args = ["-j"]
 
 [tool.py-build-cmake.linux.cmake.options]
 "VELOCEM_USE_IO_URING:BOOL" = "ON"
+"VCPKG_MANIFEST_FEATURES:STRING" = "vcpkg-uring"
 
 [tool.py-build-cmake.mac.cmake.options]
 "CMAKE_OSX_DEPLOYMENT_TARGET:STRING" = "13.3"

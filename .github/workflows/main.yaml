@@ -31,8 +31,6 @@ jobs:
           CIBW_SKIP: "pp*"
           CIBW_BUILD: "*win_amd64 *mac*"
           CIBW_BUILD_FRONTEND: build
-          # CIBW_BEFORE_ALL_LINUX: dnf install -y git zip
-          # CIBW_MANYLINUX_X86_64_IMAGE: manylinux_2_34
           MACOSX_DEPLOYMENT_TARGET: "13.3"
         uses: pypa/cibuildwheel@v2.18.1
 
@@ -41,6 +39,36 @@ jobs:
         with:
           name: wheel-${{ matrix.os }}
           path: ./wheelhouse/*.whl
+
+  build_linux:
+    name: Build wheels on linux
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Dependencies
+        run: |
+          pacman --noconfirm -Syu
+          pacman --noconfirm -S python ninja cmake git curl zip unzip tar
+          python -m venv .venv
+          source .venv/bin/activate
+          pip install --upgrade pip
+          pip install pipx
+
+      - name: Build
+        run: |
+          source .venv/bin/activate
+          pipx run build
+          platform="$(ldd --version | awk '/ldd/{gsub(/\./, "_", $NF); print "manylinux_" $NF "_x86_64"}')"
+          pipx run wheel tags --remove --platform=${platform} dist/*linux_x86_64.whl
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheel-linux
+          path: dist/*.whl
 
   build_sdist:
     name: Build sdist
@@ -61,7 +89,7 @@ jobs:
 
   upload:
     name: Upload to PyPI
-    needs: [build_wheels, build_sdist]
+    needs: [build_wheels, build_linux, build_sdist]
     environment: pypi
     permissions:
       id-token: write

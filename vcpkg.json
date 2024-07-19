@@ -11,6 +11,15 @@
     "llhttp",
     "asio"
   ],
+  "features": {
+    "vcpkg-uring": {
+      "description": "Vcpkg-provided liburing, useful for static linking",
+      "supports": "linux",
+      "dependencies": [
+        "liburing"
+      ]
+    }
+  },
   "vcpkg-configuration": {
     "default-registry": {
       "kind": "git",
