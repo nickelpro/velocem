@@ -66,7 +66,7 @@ struct Request {
   }
 
   void reset() {
-    ref_count = 1;
+    ref_count_ = 1;
     query_.reset();
     headers_.clear();
     values_.clear();
@@ -74,11 +74,11 @@ struct Request {
   }
 
 
-  std::size_t ref_count {1};
+  std::size_t ref_count_ {1};
 
 
   std::function<void(BalmStringView*)> f_free_ {[this](BalmStringView*) {
-    if(!--ref_count)
+    if(!--ref_count_)
       delete this;
   }};
 
@@ -93,7 +93,7 @@ struct Request {
   BalmStringView& query() {
     if(query_)
       return *query_;
-    ref_count++;
+    ref_count_++;
     return query_.emplace(f_free_);
   }
 
@@ -108,7 +108,7 @@ struct Request {
   }
 
   BalmStringView& next_header(char* base = nullptr, size_t len = 0) {
-    ++ref_count;
+    ++ref_count_;
     return headers_.emplace_back(f_free_, base, len).bsv;
   }
 
@@ -119,14 +119,14 @@ struct Request {
   bool process_header() {
     if(!headers_.back().process()) {
       headers_.pop_back();
-      --ref_count;
+      --ref_count_;
       return false;
     }
     return true;
   }
 
   BalmStringView& next_value(char* base = nullptr, std::size_t len = 0) {
-    ++ref_count;
+    ++ref_count_;
     return values_.emplace_back(f_free_, base, len);
   }
 
@@ -189,7 +189,7 @@ struct Request {
 struct QueuedRequest : Request {
   QueuedRequest(std::queue<QueuedRequest*>& q)
       : Request {[this, &q](BalmStringView*) {
-          if(!--ref_count) {
+          if(!--ref_count_) {
             reset();
             q.push(this);
           }

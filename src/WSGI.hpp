@@ -91,7 +91,7 @@ static void insert_body_pybytes(std::vector<char>& buf, PyObject* iter,
   if(PyBytes_GET_SIZE(iter) < sz) {
     PyErr_SetString(PyExc_ValueError,
         "Response is shorter than provided Content-Length header");
-    throw std::runtime_error("Python header error");
+    throw std::runtime_error {"Python header error"};
   }
   insert_chars(buf, PyBytes_AS_STRING(iter), sz);
 }
@@ -110,7 +110,7 @@ static void insert_body_pylist(std::vector<char>& buf, PyObject* iter,
   if(sz) {
     PyErr_SetString(PyExc_ValueError,
         "Response is shorter than provided Content-Length header");
-    throw std::runtime_error("Python header error");
+    throw std::runtime_error {"Python header error"};
   }
 }
 
@@ -129,7 +129,7 @@ static void insert_body_pytuple(std::vector<char>& buf, PyObject* iter,
   if(sz) {
     PyErr_SetString(PyExc_ValueError,
         "Response is shorter than provided Content-Length header");
-    throw std::runtime_error("Python header error");
+    throw std::runtime_error {"Python header error"};
   }
 }
 
@@ -225,7 +225,7 @@ static void insert_body_iter(std::vector<char>& buf, PyObject* iter,
   if(sz) {
     PyErr_SetString(PyExc_ValueError,
         "Response is shorter than provided Content-Length header");
-    throw std::runtime_error("Python header error");
+    throw std::runtime_error {"Python header error"};
   }
 }
 
@@ -262,7 +262,7 @@ static void insert_body_generator(std::vector<char>& buf, PyObject* iter,
   if(!first) {
     PyErr_SetString(PyExc_ValueError,
         "Response is shorter than provided Content-Length header");
-    throw std::runtime_error("Python header error");
+    throw std::runtime_error {"Python header error"};
   }
 
   try {
@@ -487,9 +487,9 @@ struct PythonApp {
       PyObject* kwnames) {
 
     PyObject* exc_info {nullptr};
-    static const char* _keywords[] = {"status", "response_headers", "exc_info",
+    static const char* _keywords[] {"status", "response_headers", "exc_info",
         nullptr};
-    static _PyArg_Parser _parser = {
+    static _PyArg_Parser _parser {
         .format = "OO|O:start_response",
         .keywords = _keywords,
     };
