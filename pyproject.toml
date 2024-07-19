@@ -1,6 +1,6 @@
 [project]
 name = "velocem"
-version = "0.0.7"
+version = "0.0.8"
 description = "Hyperspeed Python Web Framework"
 readme = "ReadMe.md"
 requires-python = ">=3.12"

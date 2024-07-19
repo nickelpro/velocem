@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.25)
 
 include(cmake/BootstrapVcpkg.cmake)
 
-project(velocem LANGUAGES C CXX VERSION 0.0.7)
+project(velocem LANGUAGES C CXX VERSION 0.0.8)
 
 find_package(Python3 3.12 REQUIRED COMPONENTS Development.Module)
 find_package(asio CONFIG REQUIRED)
