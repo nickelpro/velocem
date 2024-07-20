@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <optional>
+#include <ranges>
 #include <stdexcept>
 #include <vector>
 
@@ -23,7 +24,7 @@ enum InsertFieldResult : int {
   CONLEN,
 };
 
-static InsertFieldResult insert_field(std::vector<char>& buf, PyObject* str) {
+inline InsertFieldResult insert_field(std::vector<char>& buf, PyObject* str) {
   const char* base;
   Py_ssize_t len;
   unpack_unicode(str, &base, &len, "Header fields must be str objects");
@@ -43,7 +44,7 @@ static InsertFieldResult insert_field(std::vector<char>& buf, PyObject* str) {
   return INSERTED;
 }
 
-std::optional<Py_ssize_t> insert_header(std::vector<char>& buf,
+inline std::optional<Py_ssize_t> insert_header(std::vector<char>& buf,
     PyObject* tuple) {
   if(!PyTuple_Check(tuple)) [[unlikely]] {
     PyErr_SetString(PyExc_TypeError, "Headers must be size two tuples");
@@ -86,7 +87,7 @@ std::optional<Py_ssize_t> insert_header(std::vector<char>& buf,
   return {};
 }
 
-static void insert_body_pybytes(std::vector<char>& buf, PyObject* iter,
+inline void insert_body_pybytes(std::vector<char>& buf, PyObject* iter,
     Py_ssize_t sz) {
   if(PyBytes_GET_SIZE(iter) < sz) {
     PyErr_SetString(PyExc_ValueError,
@@ -96,13 +97,13 @@ static void insert_body_pybytes(std::vector<char>& buf, PyObject* iter,
   insert_chars(buf, PyBytes_AS_STRING(iter), sz);
 }
 
-static void insert_body_pybytes(std::vector<char>& buf, PyObject* iter) {
+inline void insert_body_pybytes(std::vector<char>& buf, PyObject* iter) {
   auto sz {PyBytes_GET_SIZE(iter)};
   insert_str(buf, std::format("Content-Length: {}\r\n\r\n", sz));
   insert_chars(buf, PyBytes_AS_STRING(iter), sz);
 }
 
-static void insert_body_pylist(std::vector<char>& buf, PyObject* iter,
+inline void insert_body_pylist(std::vector<char>& buf, PyObject* iter,
     Py_ssize_t sz) {
   for(Py_ssize_t i {0}, end {PyList_GET_SIZE(iter)}; i < end && sz; ++i)
     sz -= insert_pybytes_unchecked(buf, PyList_GET_ITEM(iter, i), sz);
@@ -114,14 +115,14 @@ static void insert_body_pylist(std::vector<char>& buf, PyObject* iter,
   }
 }
 
-static void insert_body_pylist(std::vector<char>& buf, PyObject* iter) {
+inline void insert_body_pylist(std::vector<char>& buf, PyObject* iter) {
   auto sz {get_body_list_size(iter)};
   insert_str(buf, std::format("Content-Length: {}\r\n\r\n", sz));
   for(Py_ssize_t i {0}, end {PyList_GET_SIZE(iter)}; i < end; ++i)
     insert_pybytes_unchecked(buf, PyList_GET_ITEM(iter, i));
 }
 
-static void insert_body_pytuple(std::vector<char>& buf, PyObject* iter,
+inline void insert_body_pytuple(std::vector<char>& buf, PyObject* iter,
     Py_ssize_t sz) {
   for(Py_ssize_t i {0}, end {PyTuple_GET_SIZE(iter)}; i < end && sz; ++i)
     sz -= insert_pybytes_unchecked(buf, PyTuple_GET_ITEM(iter, i), sz);
@@ -133,27 +134,27 @@ static void insert_body_pytuple(std::vector<char>& buf, PyObject* iter,
   }
 }
 
-static void insert_body_pytuple(std::vector<char>& buf, PyObject* iter) {
+inline void insert_body_pytuple(std::vector<char>& buf, PyObject* iter) {
   auto sz {get_body_tuple_size(iter)};
   insert_str(buf, std::format("Content-Length: {}\r\n\r\n", sz));
   for(Py_ssize_t i {0}, end {PyTuple_GET_SIZE(iter)}; i < end; ++i)
     insert_pybytes_unchecked(buf, PyTuple_GET_ITEM(iter, i));
 }
 
-static void insert_body_pyseq(std::vector<char>& buf, PyObject* iter) {
+inline void insert_body_pyseq(std::vector<char>& buf, PyObject* iter) {
   PyObject* seq {PySequence_Tuple(iter)};
   insert_body_pytuple(buf, seq);
   Py_DECREF(seq);
 }
 
-static void insert_body_pyseq(std::vector<char>& buf, PyObject* iter,
+inline void insert_body_pyseq(std::vector<char>& buf, PyObject* iter,
     Py_ssize_t sz) {
   PyObject* seq {PySequence_Tuple(iter)};
   insert_body_pytuple(buf, seq, sz);
   Py_DECREF(seq);
 }
 
-static PyObject* insert_body_iter_common(std::vector<char>& buf, PyObject* iter,
+inline PyObject* insert_body_iter_common(std::vector<char>& buf, PyObject* iter,
     PyObject* first) {
   PyObject* second {PyIter_Next(iter)};
   if(!second) {
@@ -190,7 +191,7 @@ static PyObject* insert_body_iter_common(std::vector<char>& buf, PyObject* iter,
   return iter;
 }
 
-static PyObject* insert_body_iter(std::vector<char>& buf, PyObject* iter) {
+inline PyObject* insert_body_iter(std::vector<char>& buf, PyObject* iter) {
   PyObject* first {PyIter_Next(iter)};
   if(!first) {
     close_iterator(iter);
@@ -203,7 +204,7 @@ static PyObject* insert_body_iter(std::vector<char>& buf, PyObject* iter) {
   return insert_body_iter_common(buf, iter, first);
 }
 
-static void insert_body_iter(std::vector<char>& buf, PyObject* iter,
+inline void insert_body_iter(std::vector<char>& buf, PyObject* iter,
     Py_ssize_t sz) {
   PyObject* next {nullptr};
   try {
@@ -229,7 +230,7 @@ static void insert_body_iter(std::vector<char>& buf, PyObject* iter,
   }
 }
 
-static PyObject* prime_generator(PyObject* iter) {
+inline PyObject* prime_generator(PyObject* iter) {
   PyObject* next {PyIter_Next(iter)};
   if(!next) {
     close_iterator(iter);
@@ -239,7 +240,7 @@ static PyObject* prime_generator(PyObject* iter) {
   return next;
 }
 
-static PyObject* insert_body_generator(std::vector<char>& buf, PyObject* iter,
+inline PyObject* insert_body_generator(std::vector<char>& buf, PyObject* iter,
     PyObject* first) {
   if(!first) {
     insert_literal(buf, "Content-Length: 0\r\n\r\n");
@@ -248,7 +249,7 @@ static PyObject* insert_body_generator(std::vector<char>& buf, PyObject* iter,
   return insert_body_iter_common(buf, iter, first);
 }
 
-static void insert_body_generator(std::vector<char>& buf, PyObject* iter,
+inline void insert_body_generator(std::vector<char>& buf, PyObject* iter,
     PyObject* first, Py_ssize_t sz) {
 
   if(!sz) {
@@ -277,7 +278,7 @@ static void insert_body_generator(std::vector<char>& buf, PyObject* iter,
 }
 
 
-static void build_body(std::vector<char>& buf, PyObject* iter,
+inline void build_body(std::vector<char>& buf, PyObject* iter,
     Py_ssize_t conlen) {
   insert_literal(buf, "\r\n");
 
@@ -297,7 +298,7 @@ static void build_body(std::vector<char>& buf, PyObject* iter,
   }
 }
 
-static PyObject* build_body(std::vector<char>& buf, PyObject* iter) {
+inline PyObject* build_body(std::vector<char>& buf, PyObject* iter) {
   if(PyBytes_Check(iter)) {
     insert_body_pybytes(buf, iter);
   } else if(PyList_Check(iter)) {

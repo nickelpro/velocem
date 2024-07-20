@@ -51,15 +51,10 @@ jobs:
       - name: Install Dependencies
         run: |
           pacman --noconfirm -Syu
-          pacman --noconfirm -S python ninja cmake git curl zip unzip tar
-          python -m venv .venv
-          source .venv/bin/activate
-          pip install --upgrade pip
-          pip install pipx
+          pacman --noconfirm -S python-pipx ninja cmake git curl zip unzip tar
 
       - name: Build
         run: |
-          source .venv/bin/activate
           pipx run build
           platform="$(ldd --version | awk '/ldd/{gsub(/\./, "_", $NF); print "manylinux_" $NF "_x86_64"}')"
           pipx run wheel tags --remove --platform=${platform} dist/*linux_x86_64.whl
