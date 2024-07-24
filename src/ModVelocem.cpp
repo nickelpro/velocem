@@ -35,6 +35,12 @@ struct {
     q.pop();
     return static_cast<Request*>(ptr);
   }
+
+  void push(Request* ptr) {
+    ptr->reset();
+    q.push(static_cast<QueuedRequest*>(ptr));
+  }
+
 } ReqQ;
 
 asio::awaitable<void> handle_iter(tcp::socket& s, PyAppRet& app) {
@@ -106,8 +112,10 @@ asio::awaitable<void> client(tcp::socket s, PythonApp& app) {
         std::memcpy(next_req->buf_.data(), rm.data(), rm.size());
       }
 
-      auto res {app.run(req, http.http_minor, http.method, http.keep_alive())};
+
+      Request* tmp = req;
       req = nullptr;
+      auto res {app.run(tmp, http.http_minor, http.method, http.keep_alive())};
 
       if(res) [[likely]] {
         if(!res->iter) {
@@ -135,10 +143,10 @@ asio::awaitable<void> client(tcp::socket s, PythonApp& app) {
   }
 
   if(req)
-    delete req;
+    ReqQ.push(req);
 
   if(next_req)
-    delete next_req;
+    ReqQ.push(next_req);
 }
 
 asio::awaitable<void> listener(tcp::endpoint ep, int reuseport, auto& app) {
