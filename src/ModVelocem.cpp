@@ -12,9 +12,11 @@
 
 #include <asio.hpp>
 
+#include "Constants.hpp"
 #include "HTTPParser.hpp"
 #include "plat/plat.hpp"
 #include "Request.hpp"
+#include "Util.hpp"
 #include "WSGI.hpp"
 
 using asio::awaitable;
@@ -43,7 +45,7 @@ struct {
 
 } ReqQ;
 
-asio::awaitable<void> handle_iter(tcp::socket& s, PyAppRet& app) {
+asio::awaitable<void> handle_iter(tcp::socket& s, WSGIAppRet& app) {
   co_await s.async_send(asio::buffer(app.buf), deferred);
 
   for(PyObject* next; (next = PyIter_Next(app.iter));) {
@@ -83,7 +85,7 @@ asio::awaitable<void> handle_iter(tcp::socket& s, PyAppRet& app) {
   co_await s.async_send(buffer_literal("0\r\n\r\n"), deferred);
 }
 
-asio::awaitable<void> client(tcp::socket s, PythonApp& app) {
+asio::awaitable<void> client(tcp::socket s, WSGIApp& app) {
   Request* req {ReqQ.pop()};
   Request* next_req {nullptr};
   HTTPParser http {req};
@@ -232,7 +234,7 @@ PyObject* run(PyObject*, PyObject* const* args, Py_ssize_t nargs,
   asio::co_spawn(io, handle_signals(io), detached);
   asio::co_spawn(io, handle_header(io), detached);
 
-  PythonApp app {appObj, host, port};
+  WSGIApp app {appObj, host, port};
   accept(io.get_executor(), host, port, reuseport, app);
   io.run();
 
