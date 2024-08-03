@@ -6,6 +6,7 @@ project(velocem LANGUAGES C CXX VERSION 0.0.8)
 
 option(VELOCEM_USE_IO_URING "Use io_uring on Linux" ON)
 option(VELOCEM_USE_IPO "Use interprocedural optimization if supported" ON)
+set(VELOCEM_WIN_SDK_VER 0x0A00 CACHE STRING "Windows SDK macro version")
 
 find_package(Python3 3.12 REQUIRED COMPONENTS Development.Module)
 find_package(asio CONFIG REQUIRED)
@@ -28,7 +29,7 @@ if(VELOCEM_USE_IPO)
 endif()
 
 if(WIN32)
-  target_compile_definitions(velocem PRIVATE _WIN32_WINDOWS=0x0A00)
+  target_compile_definitions(velocem PRIVATE _WIN32_WINDOWS=${VELOCEM_WIN_SDK_VER})
 endif()
 
 if(LINUX AND VELOCEM_USE_IO_URING)
