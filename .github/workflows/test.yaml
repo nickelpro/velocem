@@ -1,0 +1,59 @@
+name: Build and Test
+
+on:
+  workflow_dispatch:
+  push:
+  pull_request:
+
+
+jobs:
+  build_windows:
+    name: Build and Test on Windows
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build
+        env:
+          CIBW_BUILD: "*win_amd64"
+          CIBW_BUILD_FRONTEND: build
+        uses: pypa/cibuildwheel@v2.19.2
+
+  build_macos:
+    name: Build and Test on MacOS
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Xcode Switch
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest
+
+      - name: Build
+        env:
+          CIBW_BUILD: "*mac*"
+          CIBW_BUILD_FRONTEND: build
+          MACOSX_DEPLOYMENT_TARGET: "13.3"
+        uses: pypa/cibuildwheel@v2.19.2
+
+  build_linux:
+    name: Build and Test on Linux
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Dependencies
+        run: |
+          pacman --noconfirm -Syu
+          pacman --noconfirm -S python-pipx ninja cmake git curl zip unzip tar
+
+      - name: Build
+        run: |
+          pipx run build
