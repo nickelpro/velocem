@@ -35,6 +35,7 @@ struct HTTPParser : llhttp_t {
 
   std::span<char> get_rem(std::size_t offset);
 
+private:
   int on_url(const char* at, size_t length);
   static int on_url_tr(llhttp_t* parser, const char* at, size_t length);
 
@@ -84,8 +85,6 @@ struct HTTPParser : llhttp_t {
 
   bool done_ {false};
   bool keep_alive_ {false};
-
-private:
   Request* req_;
 };
 

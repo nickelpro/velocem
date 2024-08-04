@@ -12,7 +12,7 @@
 namespace velocem {
 
 constexpr char gRequiredHeadersFormat[] {
-    "Server: Velocem/0.0.8\r\nDate: {:%a, %d %b %Y %T} GMT\r\n"};
+    "Server: Velocem/0.0.9\r\nDate: {:%a, %d %b %Y %T} GMT\r\n"};
 
 inline std::string gRequiredHeaders {std::format(gRequiredHeadersFormat,
     std::chrono::floor<std::chrono::seconds>(
