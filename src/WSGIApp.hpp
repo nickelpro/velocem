@@ -1,5 +1,5 @@
-#ifndef VELOCEM_WSGI_HPP
-#define VELOCEM_WSGI_HPP
+#ifndef VELOCEM_WSGIAPP_HPP
+#define VELOCEM_WSGIAPP_HPP
 
 #include <optional>
 #include <vector>
@@ -52,4 +52,4 @@ private:
 
 } // namespace velocem
 
-#endif // VELOCEM_WSGI_APP
+#endif // VELOCEM_WSGIAPP_HPP

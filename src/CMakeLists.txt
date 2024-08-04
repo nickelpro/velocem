@@ -3,7 +3,8 @@ target_sources(velocem PRIVATE
   ModVelocem.cpp
   Request.cpp
   Util.cpp
-  WSGI.cpp
+  WSGIApp.cpp
+  WSGIServer.cpp
 )
 
 add_subdirectory(plat)
