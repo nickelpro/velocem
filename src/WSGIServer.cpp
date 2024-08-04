@@ -90,6 +90,7 @@ asio::awaitable<void> handle_iter(tcp::socket& s, WSGIAppRet& app) {
 asio::awaitable<void> client(tcp::socket s, WSGIApp& app) {
   Request* req {ReqQ.pop()};
   Request* next_req {nullptr};
+  WSGIAppRet* app_ret {nullptr};
   HTTPParser http {req};
 
   try {
@@ -119,13 +120,13 @@ asio::awaitable<void> client(tcp::socket s, WSGIApp& app) {
 
       Request* tmp = req;
       req = nullptr;
-      auto res {app.run(tmp, http.http_minor, http.method, http.keep_alive())};
+      app_ret = app.run(tmp, http.http_minor, http.method, http.keep_alive());
 
-      if(res) [[likely]] {
-        if(!res->iter) {
-          co_await s.async_send(asio::buffer(res->buf), deferred);
+      if(app_ret) [[likely]] {
+        if(!app_ret->iter) {
+          co_await s.async_send(asio::buffer(app_ret->buf), deferred);
         } else {
-          co_await handle_iter(s, *res);
+          co_await handle_iter(s, *app_ret);
         }
       } else {
         co_await s.async_send(
@@ -133,18 +134,24 @@ asio::awaitable<void> client(tcp::socket s, WSGIApp& app) {
             deferred);
       }
 
-      if(!http.keep_alive() || !res) {
+      if(!http.keep_alive() || !app_ret) {
         asio::error_code ec;
         s.shutdown(s.shutdown_both, ec);
         s.close(ec);
         break;
       }
+
+      push_WSGIAppRet(app_ret);
+      app_ret = nullptr;
     }
   } catch(...) {
     asio::error_code ec;
     s.shutdown(s.shutdown_both, ec);
     s.close(ec);
   }
+
+  if(app_ret)
+    push_WSGIAppRet(app_ret);
 
   if(req)
     ReqQ.push(req);

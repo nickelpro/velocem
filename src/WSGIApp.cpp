@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cstdlib>
 #include <optional>
+#include <queue>
 #include <ranges>
 #include <stdexcept>
 #include <vector>
@@ -37,7 +38,7 @@ InsertFieldResult insert_field(std::vector<char>& buf, PyObject* str) {
   Py_ssize_t len;
   unpack_unicode(str, &base, &len, "Header fields must be str objects");
 
-  if(len == 14 && !strncasecmp("Content-Length", base, 17)) [[unlikely]] {
+  if(len == 14 && !strncasecmp("Content-Length", base, 14)) [[unlikely]] {
     buf.insert(buf.end(), base, base + len);
     return CONLEN;
   }
@@ -320,7 +321,38 @@ PyObject* build_body(std::vector<char>& buf, PyObject* iter) {
   return nullptr;
 }
 
+struct {
+  std::queue<WSGIAppRet*> q;
+
+  WSGIAppRet* pop() {
+    if(q.empty()) {
+      auto ptr = new WSGIAppRet;
+      ptr->buf.reserve(1024);
+      return ptr;
+    }
+    auto ptr = q.front();
+    q.pop();
+    return ptr;
+  }
+
+  void push(WSGIAppRet* ptr) {
+    ptr->reset();
+    q.push(ptr);
+  }
+
+} AppRetQ;
+
 } // namespace
+
+void WSGIAppRet::reset() {
+  buf.clear();
+  conlen.reset();
+  iter = nullptr;
+}
+
+void push_WSGIAppRet(WSGIAppRet* appret) {
+  AppRetQ.push(appret);
+}
 
 WSGIApp::WSGIApp(PyObject* app, const char* host, const char* port)
     : app_ {app}, vecCall_ {PyVectorcall_Function(app)} {
@@ -365,10 +397,9 @@ WSGIApp::~WSGIApp() {
   Py_DECREF(cap_);
 }
 
-std::optional<WSGIAppRet> WSGIApp::run(Request* req, int http_minor, int meth,
+WSGIAppRet* WSGIApp::run(Request* req, int http_minor, int meth,
     bool keepalive) {
-  WSGIAppRet ret {};
-  ret.buf.reserve(1024); // Nice round numbers
+  WSGIAppRet* ret {AppRetQ.pop()};
 
   auto env {make_env(req, http_minor, meth)};
   PyObject* iter {nullptr};
@@ -392,17 +423,17 @@ std::optional<WSGIAppRet> WSGIApp::run(Request* req, int http_minor, int meth,
 
     if(PyGen_Check(iter)) {
       PyObject* first {prime_generator(iter)};
-      ret.conlen = build_headers(ret.buf, keepalive);
-      if(!ret.conlen)
-        ret.iter = insert_body_generator(ret.buf, iter, first);
+      ret->conlen = build_headers(ret->buf, keepalive);
+      if(!ret->conlen)
+        ret->iter = insert_body_generator(ret->buf, iter, first);
       else
-        insert_body_generator(ret.buf, iter, first, *ret.conlen);
+        insert_body_generator(ret->buf, iter, first, *ret->conlen);
     } else {
-      ret.conlen = build_headers(ret.buf, keepalive);
-      if(!ret.conlen)
-        ret.iter = build_body(ret.buf, iter);
+      ret->conlen = build_headers(ret->buf, keepalive);
+      if(!ret->conlen)
+        ret->iter = build_body(ret->buf, iter);
       else
-        build_body(ret.buf, iter, *ret.conlen);
+        build_body(ret->buf, iter, *ret->conlen);
     }
 
 
@@ -413,10 +444,11 @@ std::optional<WSGIAppRet> WSGIApp::run(Request* req, int http_minor, int meth,
     Py_XDECREF(iter);
     Py_XDECREF(status_);
     Py_XDECREF(headers_);
-    return {};
+    AppRetQ.push(ret);
+    return nullptr;
   }
 
-  if(!ret.iter)
+  if(!ret->iter)
     Py_DECREF(iter);
   Py_DECREF(status_);
   Py_DECREF(headers_);

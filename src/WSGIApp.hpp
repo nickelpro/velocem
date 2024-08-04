@@ -12,10 +12,14 @@
 namespace velocem {
 
 struct WSGIAppRet {
+  void reset();
+
   std::vector<char> buf;
   PyObject* iter {nullptr};
   std::optional<Py_ssize_t> conlen;
 };
+
+void push_WSGIAppRet(WSGIAppRet* appret);
 
 struct WSGIApp {
   WSGIApp(PyObject* app, const char* host, const char* port);
@@ -25,8 +29,7 @@ struct WSGIApp {
 
   ~WSGIApp();
 
-  std::optional<WSGIAppRet> run(Request* req, int http_minor, int meth,
-      bool keepalive);
+  WSGIAppRet* run(Request* req, int http_minor, int meth, bool keepalive);
 
 private:
   PyObject* make_env(Request* req, int http_minor, int meth);
