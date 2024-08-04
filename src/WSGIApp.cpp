@@ -404,6 +404,7 @@ WSGIAppRet* WSGIApp::run(Request* req, int http_minor, int meth,
   auto env {make_env(req, http_minor, meth)};
   PyObject* iter {nullptr};
 
+  in_handle = true;
   status_ = nullptr;
   headers_ = nullptr;
 
@@ -424,12 +425,19 @@ WSGIAppRet* WSGIApp::run(Request* req, int http_minor, int meth,
     if(PyGen_Check(iter)) {
       PyObject* first {prime_generator(iter)};
       ret->conlen = build_headers(ret->buf, keepalive);
+
+      // Once we've built the headers you don't get to change them anymore
+      in_handle = false;
+
       if(!ret->conlen)
         ret->iter = insert_body_generator(ret->buf, iter, first);
       else
         insert_body_generator(ret->buf, iter, first, *ret->conlen);
+
     } else {
       ret->conlen = build_headers(ret->buf, keepalive);
+      in_handle = false;
+
       if(!ret->conlen)
         ret->iter = build_body(ret->buf, iter);
       else
@@ -445,6 +453,8 @@ WSGIAppRet* WSGIApp::run(Request* req, int http_minor, int meth,
     Py_XDECREF(status_);
     Py_XDECREF(headers_);
     AppRetQ.push(ret);
+
+    in_handle = false;
     return nullptr;
   }
 
@@ -516,6 +526,9 @@ PyObject* WSGIApp::start_response(PyObject* const* args, Py_ssize_t nargs,
     PyObject* kwnames) {
 
   PyObject* exc_info {nullptr};
+  PyObject* status;
+  PyObject* headers;
+
   static const char* _keywords[] {"status", "response_headers", "exc_info",
       nullptr};
   static _PyArg_Parser _parser {
@@ -523,12 +536,35 @@ PyObject* WSGIApp::start_response(PyObject* const* args, Py_ssize_t nargs,
       .keywords = _keywords,
   };
 
-  if(!_PyArg_ParseStackAndKeywords(args, nargs, kwnames, &_parser, &status_,
-         &headers_, &exc_info))
+  if(!_PyArg_ParseStackAndKeywords(args, nargs, kwnames, &_parser, &status,
+         &headers, &exc_info))
     return nullptr;
 
-  Py_INCREF(status_);
-  Py_INCREF(headers_);
+  if(status_) [[unlikely]] {
+    if(!exc_info) {
+      PyErr_SetString(PyExc_TypeError,
+          "'start_response' called twice without passing 'exc_info' the second "
+          "time");
+      return nullptr;
+    }
+
+    if(!(PyTuple_Check(exc_info) || PyTuple_GET_SIZE(exc_info) != 3)) {
+      PyErr_SetString(PyExc_TypeError, "'exc_info' must be a 3-tuple");
+      return nullptr;
+    }
+
+    if(!in_handle) {
+      Py_INCREF(exc_info);
+      PyErr_SetRaisedException(exc_info);
+      return nullptr;
+    }
+
+    Py_DECREF(status_);
+    Py_DECREF(headers_);
+  }
+
+  Py_INCREF(status_ = status);
+  Py_INCREF(headers_ = headers);
 
   Py_RETURN_NONE;
 }

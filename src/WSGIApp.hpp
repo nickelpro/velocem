@@ -43,6 +43,8 @@ private:
   static PyObject* start_response_tr(PyObject* self, PyObject* const* args,
       Py_ssize_t nargs, PyObject* kwnames);
 
+
+  bool in_handle;
   PyObject* app_;
   PyObject* baseEnv_;
   vectorcallfunc vecCall_;
