@@ -1,6 +1,7 @@
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 
+#include "Constants.hpp"
 #include "WSGIServer.hpp"
 
 namespace {
@@ -27,5 +28,6 @@ PyMODINIT_FUNC PyInit_velocem(void) {
     return nullptr;
   if(PyModule_AddStringConstant(mod, "__version__", "0.0.9") == -1)
     return nullptr;
+  velocem::init_gPO();
   return mod;
 }
