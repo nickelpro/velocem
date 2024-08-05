@@ -26,7 +26,7 @@ PyMODINIT_FUNC PyInit_velocem(void) {
   auto mod {PyModule_Create(&VelocemModule)};
   if(!mod)
     return nullptr;
-  if(PyModule_AddStringConstant(mod, "__version__", "0.0.9") == -1)
+  if(PyModule_AddStringConstant(mod, "__version__", "0.0.10") == -1)
     return nullptr;
   velocem::init_gPO();
   return mod;
