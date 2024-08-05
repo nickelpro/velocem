@@ -6,6 +6,7 @@ project(velocem LANGUAGES C CXX VERSION 0.0.10)
 
 option(VELOCEM_USE_IO_URING "Use io_uring on Linux" ON)
 option(VELOCEM_USE_IPO "Use interprocedural optimization if supported" ON)
+option(VELOCEM_STRIP "Run system strip on compiled module" ON)
 set(VELOCEM_WIN_SDK_VER 0x0A00 CACHE STRING "Windows SDK macro version")
 
 find_package(Python3 3.12 REQUIRED COMPONENTS Development.Module)
@@ -15,6 +16,7 @@ find_package(llhttp CONFIG REQUIRED)
 Python3_add_library(velocem MODULE)
 target_link_libraries(velocem PRIVATE asio::asio llhttp::llhttp_static Python3::Module)
 target_compile_features(velocem PRIVATE cxx_std_23)
+target_compile_definitions(velocem PRIVATE ASIO_DISABLE_VISIBILITY)
 set_target_properties(velocem PROPERTIES CXX_VISIBILITY_PRESET hidden)
 
 if(VELOCEM_USE_IPO)
@@ -47,8 +49,24 @@ if(CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL GNU)
   target_compile_options(velocem PRIVATE
     -Wall -Wextra -Wno-missing-field-initializers -Wno-cast-function-type
   )
+
+  if(NOT APPLE)
+    target_link_options(velocem PRIVATE -Wl,--exclude-libs,ALL)
+  endif()
 elseif(CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL MSVC)
   target_compile_options(velocem PRIVATE /W3)
+endif()
+
+if(VELOCEM_STRIP AND DEFINED CMAKE_STRIP)
+  if(APPLE)
+    add_custom_command(TARGET velocem POST_BUILD
+      COMMAND ${CMAKE_STRIP} -x $<TARGET_FILE:velocem>
+    )
+  else()
+    add_custom_command(TARGET velocem POST_BUILD
+      COMMAND ${CMAKE_STRIP} $<TARGET_FILE:velocem>
+    )
+  endif()
 endif()
 
 add_subdirectory(src)
