@@ -43,13 +43,20 @@ private:
   static PyObject* start_response_tr(PyObject* self, PyObject* const* args,
       Py_ssize_t nargs, PyObject* kwnames);
 
+  PyObject* write_cb(PyObject* const* args, Py_ssize_t nargs);
+
+  static PyObject* write_cb_tr(PyObject* self, PyObject* const* args,
+      Py_ssize_t nargs);
 
   bool in_handle;
+  std::vector<char> writebuf_;
+
   PyObject* app_;
   PyObject* baseEnv_;
   vectorcallfunc vecCall_;
   PyObject* cap_;
   PyObject* sr_;
+  PyObject* wcb_;
 
   PyObject* status_;
   PyObject* headers_;

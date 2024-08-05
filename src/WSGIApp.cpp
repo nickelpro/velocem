@@ -96,6 +96,14 @@ std::optional<Py_ssize_t> insert_header(std::vector<char>& buf,
   return {};
 }
 
+void insert_body_pybytes(std::vector<char>& buf, std::vector<char>& wb,
+    PyObject* iter) {
+  auto sz {PyBytes_GET_SIZE(iter)};
+  insert_str(buf, std::format("Content-Length: {}\r\n\r\n", sz + wb.size()));
+  buf.insert(buf.end(), wb.begin(), wb.end());
+  insert_chars(buf, PyBytes_AS_STRING(iter), sz);
+}
+
 void insert_body_pybytes(std::vector<char>& buf, PyObject* iter,
     Py_ssize_t sz) {
   if(PyBytes_GET_SIZE(iter) < sz) {
@@ -103,12 +111,6 @@ void insert_body_pybytes(std::vector<char>& buf, PyObject* iter,
         "Response is shorter than provided Content-Length header");
     throw std::runtime_error {"Python header error"};
   }
-  insert_chars(buf, PyBytes_AS_STRING(iter), sz);
-}
-
-void insert_body_pybytes(std::vector<char>& buf, PyObject* iter) {
-  auto sz {PyBytes_GET_SIZE(iter)};
-  insert_str(buf, std::format("Content-Length: {}\r\n\r\n", sz));
   insert_chars(buf, PyBytes_AS_STRING(iter), sz);
 }
 
@@ -123,9 +125,11 @@ void insert_body_pylist(std::vector<char>& buf, PyObject* iter, Py_ssize_t sz) {
   }
 }
 
-void insert_body_pylist(std::vector<char>& buf, PyObject* iter) {
+void insert_body_pylist(std::vector<char>& buf, std::vector<char>& wb,
+    PyObject* iter) {
   auto sz {get_body_list_size(iter)};
-  insert_str(buf, std::format("Content-Length: {}\r\n\r\n", sz));
+  insert_str(buf, std::format("Content-Length: {}\r\n\r\n", sz + wb.size()));
+  buf.insert(buf.end(), wb.begin(), wb.end());
   for(Py_ssize_t i {0}, end {PyList_GET_SIZE(iter)}; i < end; ++i)
     insert_pybytes_unchecked(buf, PyList_GET_ITEM(iter, i));
 }
@@ -142,16 +146,19 @@ void insert_body_pytuple(std::vector<char>& buf, PyObject* iter,
   }
 }
 
-void insert_body_pytuple(std::vector<char>& buf, PyObject* iter) {
+void insert_body_pytuple(std::vector<char>& buf, std::vector<char>& wb,
+    PyObject* iter) {
   auto sz {get_body_tuple_size(iter)};
-  insert_str(buf, std::format("Content-Length: {}\r\n\r\n", sz));
+  insert_str(buf, std::format("Content-Length: {}\r\n\r\n", sz + wb.size()));
+  buf.insert(buf.end(), wb.begin(), wb.end());
   for(Py_ssize_t i {0}, end {PyTuple_GET_SIZE(iter)}; i < end; ++i)
     insert_pybytes_unchecked(buf, PyTuple_GET_ITEM(iter, i));
 }
 
-void insert_body_pyseq(std::vector<char>& buf, PyObject* iter) {
+void insert_body_pyseq(std::vector<char>& buf, std::vector<char>& wb,
+    PyObject* iter) {
   PyObject* seq {PySequence_Tuple(iter)};
-  insert_body_pytuple(buf, seq);
+  insert_body_pytuple(buf, wb, seq);
   Py_DECREF(seq);
 }
 
@@ -161,8 +168,8 @@ void insert_body_pyseq(std::vector<char>& buf, PyObject* iter, Py_ssize_t sz) {
   Py_DECREF(seq);
 }
 
-PyObject* insert_body_iter_common(std::vector<char>& buf, PyObject* iter,
-    PyObject* first) {
+PyObject* insert_body_iter_common(std::vector<char>& buf, std::vector<char>& wb,
+    PyObject* iter, PyObject* first) {
   PyObject* second {PyIter_Next(iter)};
   if(!second) {
     close_iterator(iter);
@@ -173,7 +180,8 @@ PyObject* insert_body_iter_common(std::vector<char>& buf, PyObject* iter,
     Py_ssize_t len;
     unpack_pybytes(first, &bytes, &len, "Response iterator must yield bytes");
 
-    insert_str(buf, std::format("Content-Length: {}\r\n\r\n", len));
+    insert_str(buf, std::format("Content-Length: {}\r\n\r\n", len + wb.size()));
+    buf.insert(buf.end(), wb.begin(), wb.end());
     insert_chars(buf, bytes, len);
     Py_DECREF(first);
     return nullptr;
@@ -189,7 +197,8 @@ PyObject* insert_body_iter_common(std::vector<char>& buf, PyObject* iter,
   Py_ssize_t len2;
   unpack_pybytes(second, &bytes2, &len2, "Response iterator must yield bytes");
 
-  insert_str(buf, std::format("{:x}\r\n", len + len2));
+  insert_str(buf, std::format("{:x}\r\n", len + len2 + wb.size()));
+  buf.insert(buf.end(), wb.begin(), wb.end());
   insert_chars(buf, bytes, len);
   insert_chars(buf, bytes2, len2);
   insert_literal(buf, "\r\n");
@@ -198,7 +207,8 @@ PyObject* insert_body_iter_common(std::vector<char>& buf, PyObject* iter,
   return iter;
 }
 
-PyObject* insert_body_iter(std::vector<char>& buf, PyObject* iter) {
+PyObject* insert_body_iter(std::vector<char>& buf, std::vector<char>& wb,
+    PyObject* iter) {
   PyObject* first {PyIter_Next(iter)};
   if(!first) {
     close_iterator(iter);
@@ -208,7 +218,7 @@ PyObject* insert_body_iter(std::vector<char>& buf, PyObject* iter) {
     return nullptr;
   }
 
-  return insert_body_iter_common(buf, iter, first);
+  return insert_body_iter_common(buf, wb, iter, first);
 }
 
 void insert_body_iter(std::vector<char>& buf, PyObject* iter, Py_ssize_t sz) {
@@ -246,24 +256,28 @@ PyObject* prime_generator(PyObject* iter) {
   return next;
 }
 
-PyObject* insert_body_generator(std::vector<char>& buf, PyObject* iter,
-    PyObject* first) {
+PyObject* insert_body_generator(std::vector<char>& buf, std::vector<char>& wb,
+    PyObject* iter, PyObject* first) {
   if(!first) {
     insert_literal(buf, "Content-Length: 0\r\n\r\n");
     return nullptr;
   }
-  return insert_body_iter_common(buf, iter, first);
+  return insert_body_iter_common(buf, wb, iter, first);
 }
 
-void insert_body_generator(std::vector<char>& buf, PyObject* iter,
-    PyObject* first, Py_ssize_t sz) {
+void insert_body_generator(std::vector<char>& buf, std::vector<char>& wb,
+    PyObject* iter, PyObject* first, Py_ssize_t sz) {
 
-  if(!sz) {
+  if(wb.size() >= static_cast<std::size_t>(sz)) {
+    buf.insert(buf.end(), wb.begin(), wb.begin() + sz);
     if(first) {
       Py_DECREF(first);
       close_iterator(iter);
     }
     return;
+  } else {
+    buf.insert(buf.end(), wb.begin(), wb.end());
+    sz -= wb.size();
   }
 
   if(!first) {
@@ -284,8 +298,19 @@ void insert_body_generator(std::vector<char>& buf, PyObject* iter,
 }
 
 
-void build_body(std::vector<char>& buf, PyObject* iter, Py_ssize_t conlen) {
+void build_body(std::vector<char>& buf, std::vector<char>& wb, PyObject* iter,
+    Py_ssize_t conlen) {
   insert_literal(buf, "\r\n");
+
+  if(!wb.empty()) [[unlikely]] {
+    if(wb.size() >= static_cast<std::size_t>(conlen)) {
+      buf.insert(buf.end(), wb.begin(), wb.begin() + conlen);
+      return;
+    }
+
+    buf.insert(buf.end(), wb.begin(), wb.end());
+    conlen -= wb.size();
+  }
 
   if(PyBytes_Check(iter)) {
     insert_body_pybytes(buf, iter, conlen);
@@ -303,17 +328,18 @@ void build_body(std::vector<char>& buf, PyObject* iter, Py_ssize_t conlen) {
   }
 }
 
-PyObject* build_body(std::vector<char>& buf, PyObject* iter) {
+PyObject* build_body(std::vector<char>& buf, std::vector<char>& wb,
+    PyObject* iter) {
   if(PyBytes_Check(iter)) {
-    insert_body_pybytes(buf, iter);
+    insert_body_pybytes(buf, wb, iter);
   } else if(PyList_Check(iter)) {
-    insert_body_pylist(buf, iter);
+    insert_body_pylist(buf, wb, iter);
   } else if(PyTuple_Check(iter)) {
-    insert_body_pytuple(buf, iter);
+    insert_body_pytuple(buf, wb, iter);
   } else if(PySequence_Check(iter)) {
-    insert_body_pyseq(buf, iter);
+    insert_body_pyseq(buf, wb, iter);
   } else if(PyIter_Check(iter)) {
-    return insert_body_iter(buf, iter);
+    return insert_body_iter(buf, wb, iter);
   } else {
     PyErr_SetString(PyExc_TypeError, "WSGI App must return iterable");
     throw std::runtime_error {"Python iter error"};
@@ -363,17 +389,19 @@ WSGIApp::WSGIApp(PyObject* app, const char* host, const char* port)
       .ml_flags = METH_FASTCALL | METH_KEYWORDS,
   };
 
+  static PyMethodDef wcbdef {
+      .ml_name = "write",
+      .ml_meth = (PyCFunction) write_cb_tr,
+      .ml_flags = METH_FASTCALL,
+  };
+
   cap_ = PyCapsule_New(this, NULL, NULL);
   sr_ = PyCFunction_New(&srdef, cap_);
+  wcb_ = PyCFunction_New(&wcbdef, cap_);
   baseEnv_ = _PyDict_NewPresized(64);
 
-  PyObject* ver {PyTuple_Pack(2, PyLong_FromLong(1), PyLong_FromLong(0))};
-  PyDict_SetItemString(baseEnv_, "wsgi.version", ver);
-  Py_DECREF(ver);
-
-  PyObject* http {PyUnicode_FromString("http")};
-  PyDict_SetItemString(baseEnv_, "wsgi.url_scheme", http);
-  Py_DECREF(http);
+  PyDict_SetItemString(baseEnv_, "wsgi.version", gPO.wsgi_ver);
+  PyDict_SetItemString(baseEnv_, "wsgi.url_scheme", gPO.http);
 
   PyObject* phost {PyUnicode_FromString(host)};
   PyDict_SetItemString(baseEnv_, "SERVER_NAME", phost);
@@ -394,6 +422,7 @@ WSGIApp::WSGIApp(PyObject* app, const char* host, const char* port)
 WSGIApp::~WSGIApp() {
   Py_DECREF(baseEnv_);
   Py_DECREF(sr_);
+  Py_DECREF(wcb_);
   Py_DECREF(cap_);
 }
 
@@ -407,6 +436,7 @@ WSGIAppRet* WSGIApp::run(Request* req, int http_minor, int meth,
   in_handle = true;
   status_ = nullptr;
   headers_ = nullptr;
+  writebuf_.clear();
 
   try {
     if(vecCall_) {
@@ -421,7 +451,6 @@ WSGIAppRet* WSGIApp::run(Request* req, int http_minor, int meth,
     if(!iter) [[unlikely]]
       throw std::runtime_error {"Python function call error"};
 
-
     if(PyGen_Check(iter)) {
       PyObject* first {prime_generator(iter)};
       ret->conlen = build_headers(ret->buf, keepalive);
@@ -430,18 +459,18 @@ WSGIAppRet* WSGIApp::run(Request* req, int http_minor, int meth,
       in_handle = false;
 
       if(!ret->conlen)
-        ret->iter = insert_body_generator(ret->buf, iter, first);
+        ret->iter = insert_body_generator(ret->buf, writebuf_, iter, first);
       else
-        insert_body_generator(ret->buf, iter, first, *ret->conlen);
+        insert_body_generator(ret->buf, writebuf_, iter, first, *ret->conlen);
 
     } else {
       ret->conlen = build_headers(ret->buf, keepalive);
       in_handle = false;
 
       if(!ret->conlen)
-        ret->iter = build_body(ret->buf, iter);
+        ret->iter = build_body(ret->buf, writebuf_, iter);
       else
-        build_body(ret->buf, iter, *ret->conlen);
+        build_body(ret->buf, writebuf_, iter, *ret->conlen);
     }
 
 
@@ -566,13 +595,29 @@ PyObject* WSGIApp::start_response(PyObject* const* args, Py_ssize_t nargs,
   Py_INCREF(status_ = status);
   Py_INCREF(headers_ = headers);
 
-  Py_RETURN_NONE;
+  return wcb_;
 }
 
 PyObject* WSGIApp::start_response_tr(PyObject* self, PyObject* const* args,
     Py_ssize_t nargs, PyObject* kwnames) {
   auto pyapp {PyCapsule_GetPointer(self, nullptr)};
-  return ((WSGIApp*) pyapp)->start_response(args, nargs, kwnames);
+  return (static_cast<WSGIApp*>(pyapp))->start_response(args, nargs, kwnames);
+}
+
+PyObject* WSGIApp::write_cb(PyObject* const* args, Py_ssize_t nargs) {
+  PyObject* bytes;
+
+  if(!_PyArg_ParseStack(args, nargs, "S", &bytes))
+    return nullptr;
+
+  insert_pybytes_unchecked(writebuf_, bytes);
+  Py_RETURN_NONE;
+}
+
+PyObject* WSGIApp::write_cb_tr(PyObject* self, PyObject* const* args,
+    Py_ssize_t nargs) {
+  auto pyapp {PyCapsule_GetPointer(self, nullptr)};
+  return (static_cast<WSGIApp*>(pyapp))->write_cb(args, nargs);
 }
 
 } // namespace velocem
