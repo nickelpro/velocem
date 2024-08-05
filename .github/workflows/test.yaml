@@ -15,11 +15,23 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
       - name: Build
-        env:
-          CIBW_BUILD: "*win_amd64"
-          CIBW_BUILD_FRONTEND: build
-        uses: pypa/cibuildwheel@v2.19.2
+        run: |
+          python -m venv .venv
+          .venv\Scripts\Activate.ps1
+          pip install --upgrade pip
+          pip install .
+
+      - name: Test
+        run: |
+          .venv\Scripts\Activate.ps1
+          pip install pytest
+          pytest test
 
   build_macos:
     name: Build and Test on MacOS
@@ -35,11 +47,17 @@ jobs:
           xcode-version: latest
 
       - name: Build
-        env:
-          CIBW_BUILD: "*mac*"
-          CIBW_BUILD_FRONTEND: build
-          MACOSX_DEPLOYMENT_TARGET: "13.3"
-        uses: pypa/cibuildwheel@v2.19.2
+        run: |
+          python -m venv .venv
+          . .venv/bin/activate
+          pip install --upgrade pip
+          pip install .
+
+      - name: Test
+        run: |
+          . .venv/bin/activate
+          pip install pytest
+          pytest test
 
   build_linux:
     name: Build and Test on Linux
@@ -52,8 +70,17 @@ jobs:
       - name: Install Dependencies
         run: |
           pacman --noconfirm -Syu
-          pacman --noconfirm -S python-pipx ninja cmake git curl zip unzip tar
+          pacman --noconfirm -S python-pip ninja cmake git zip unzip
 
       - name: Build
         run: |
-          pipx run build
+          python -m venv .venv
+          . .venv/bin/activate
+          pip install --upgrade pip
+          pip install .
+
+      - name: Test
+        run: |
+          . .venv/bin/activate
+          pip install pytest
+          pytest test
