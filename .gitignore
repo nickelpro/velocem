@@ -1,10 +1,18 @@
+# IDE and development folders
 .vscode/
 .venv/
+
+# Miscellaneous build and testing folders
 build/
 callgrind/
 sandbox/
 dist/
 bm/
+
+# Python folders
 __pycache__/
+.py-build-cmake_cache/
+.pytest_cache/
+
+# Loose files
 requirements.txt
-.py-build-cmake_cache
