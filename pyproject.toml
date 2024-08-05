@@ -36,10 +36,11 @@ build_type = "Release"
 build_args = ["-j"]
 
 [tool.py-build-cmake.linux.cmake.options]
-"VELOCEM_USE_IO_URING:BOOL" = "ON"
 "VCPKG_MANIFEST_FEATURES:STRING" = "vcpkg-uring"
+"VELOCEM_USE_IO_URING:BOOL" = "ON"
 
 [tool.py-build-cmake.mac.cmake.options]
+"VCPKG_OSX_DEPLOYMENT_TARGET:STRING" = "13.3"
 "CMAKE_OSX_DEPLOYMENT_TARGET:STRING" = "13.3"
 
 [tool.py-build-cmake.windows.cmake.options]
