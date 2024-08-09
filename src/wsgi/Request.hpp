@@ -1,5 +1,5 @@
-#ifndef VELOCEM_REQUEST_H
-#define VELOCEM_REQUEST_H
+#ifndef VELOCEM_WSGI_REQUEST_HPP
+#define VELOCEM_WSGI_REQUEST_HPP
 
 #include <cstdlib>
 #include <functional>
@@ -10,16 +10,18 @@
 
 #include <asio.hpp>
 
-#include "Balm.hpp"
+#include "util/BalmStringView.hpp"
+
+#include "Input.hpp"
 
 namespace velocem {
 
-struct Header {
+struct WSGIHeader {
 
-  Header(std::function<void(BalmStringView*)> f_free, char* base = nullptr,
+  WSGIHeader(std::function<void(BalmStringView*)> f_free, char* base = nullptr,
       size_t len = 0);
-  Header(const Header& other);
-  Header(Header&& other);
+  WSGIHeader(const WSGIHeader& other);
+  WSGIHeader(WSGIHeader&& other);
 
   BalmStringView bsv;
   std::string buf;
@@ -27,10 +29,10 @@ struct Header {
   bool process();
 };
 
-struct Request {
+struct WSGIRequest {
 
-  Request();
-  Request(std::function<void(BalmStringView*)> f_free);
+  WSGIRequest();
+  WSGIRequest(std::function<void(WSGIRequest*)> f_free);
 
   void reset();
 
@@ -52,31 +54,28 @@ struct Request {
       std::size_t minsize = 1024);
   asio::mutable_buffer get_parse_buf(std::size_t offset, std::size_t n);
 
-  std::size_t ref_count_ {1};
+  std::size_t ref_count_ {2};
 
-  std::function<void(BalmStringView*)> f_free_ {[this](BalmStringView*) {
+  std::function<void(WSGIRequest*)> f_free_ {
+      [this](WSGIRequest*) { delete this; }};
+
+  WSGIInput input_ {[this](WSGIInput*) {
     if(!--ref_count_)
-      delete this;
+      f_free_(this);
   }};
 
-  BalmStringView url_ {f_free_};
+  BalmStringView url_ {[this](BalmStringView*) {
+    if(!--ref_count_)
+      f_free_(this);
+  }};
+
   std::optional<BalmStringView> query_;
 
-  std::vector<Header> headers_;
+  std::vector<WSGIHeader> headers_;
   std::vector<BalmStringView> values_;
   std::vector<char> buf_;
 };
 
-struct QueuedRequest : Request {
-  QueuedRequest(std::queue<QueuedRequest*>& q)
-      : Request {[this, &q](BalmStringView*) {
-          if(!--ref_count_) {
-            reset();
-            q.push(this);
-          }
-        }} {};
-};
-
 } // namespace velocem
 
-#endif // VELOCEM_REQUEST_H
+#endif // VELOCEM_WSGI_REQUEST_HPP

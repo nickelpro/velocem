@@ -1,5 +1,5 @@
-#ifndef VELOCEM_GIL_BALM_H
-#define VELOCEM_GIL_BALM_H
+#ifndef VELOCEM_BALM_STRINGVIEW_HPP
+#define VELOCEM_BALM_STRINGVIEW_HPP
 
 #include <array>
 #include <cstdlib>
@@ -69,4 +69,4 @@ inline auto format_as(BalmStringView sv) {
 
 } // namespace velocem
 
-#endif // VELOCEM_GIL_BALM_H
+#endif // VELOCEM_BALM_STRINGVIEW_HPP

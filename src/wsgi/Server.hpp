@@ -1,5 +1,5 @@
-#ifndef VELOCEM_WSGISERVER_H
-#define VELOCEM_WSGISERVER_H
+#ifndef VELOCEM_WSGI_SERVER_HPP
+#define VELOCEM_WSGI_SERVER_HPP
 
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
@@ -11,4 +11,4 @@ PyObject* run_wsgi_server(PyObject* /* self */, PyObject* const* args,
 
 } // namespace velocem
 
-#endif // VELOCEM_WSGISERVER_H
+#endif // VELOCEM_WSGI_SERVER_HPP

@@ -11,7 +11,7 @@
 
 #include <asio.hpp>
 
-#include "Balm.hpp"
+#include "util/BalmStringView.hpp"
 
 namespace {
 std::size_t unquote_url_inplace(char* url, size_t len) {
@@ -21,7 +21,7 @@ std::size_t unquote_url_inplace(char* url, size_t len) {
       -1,-1,-1,-1,-1,-1,-1,-1, -1,-1,-1,-1,-1,-1,-1,-1,
       -1,-1,-1,-1,-1,-1,-1,-1, -1,-1,-1,-1,-1,-1,-1,-1,
       -1,-1,-1,-1,-1,-1,-1,-1, -1,-1,-1,-1,-1,-1,-1,-1,
-        0, 1, 2, 3, 4, 5, 6, 7,  8, 9,-1,-1,-1,-1,-1,-1,
+       0, 1, 2, 3, 4, 5, 6, 7,  8, 9,-1,-1,-1,-1,-1,-1,
       -1,10,11,12,13,14,15,-1, -1,-1,-1,-1,-1,-1,-1,-1,
       -1,-1,-1,-1,-1,-1,-1,-1, -1,-1,-1,-1,-1,-1,-1,-1,
       -1,10,11,12,13,14,15,-1, -1,-1,-1,-1,-1,-1,-1,-1,
@@ -70,20 +70,21 @@ std::size_t unquote_url_inplace(char* url, size_t len) {
 
 namespace velocem {
 
-Header::Header(std::function<void(BalmStringView*)> f_free, char* base,
+WSGIHeader::WSGIHeader(std::function<void(BalmStringView*)> f_free, char* base,
     size_t len)
     : bsv {f_free, base, len} {}
 
-Header::Header(const Header& other) : bsv {other.bsv}, buf {other.buf} {
+WSGIHeader::WSGIHeader(const WSGIHeader& other)
+    : bsv {other.bsv}, buf {other.buf} {
   bsv.from(buf.data(), buf.size());
 }
 
-Header::Header(Header&& other)
+WSGIHeader::WSGIHeader(WSGIHeader&& other)
     : bsv {std::move(other.bsv)}, buf {std::move(other.buf)} {
   bsv.from(buf.data(), buf.size());
 }
 
-bool Header::process() {
+bool WSGIHeader::process() {
   buf.resize(bsv._base.utf8_length + 5);
   char* target = buf.data() + 5;
   for(Py_ssize_t i = 0; i < bsv._base.utf8_length; ++i) {
@@ -102,42 +103,42 @@ bool Header::process() {
   return true;
 }
 
-Request::Request() {
+WSGIRequest::WSGIRequest() {
   headers_.reserve(32);
   values_.reserve(32);
 }
 
-Request::Request(std::function<void(BalmStringView*)> f_free)
+WSGIRequest::WSGIRequest(std::function<void(WSGIRequest*)> f_free)
     : f_free_ {f_free} {
   headers_.reserve(32);
   values_.reserve(32);
 }
 
-void Request::reset() {
-  ref_count_ = 1;
+void WSGIRequest::reset() {
+  ref_count_ = 2;
   query_.reset();
   headers_.clear();
   values_.clear();
   buf_.clear();
 }
 
-BalmStringView& Request::url() {
+BalmStringView& WSGIRequest::url() {
   return url_;
 }
 
-bool Request::has_query() {
+bool WSGIRequest::has_query() {
   return query_.has_value();
 }
 
-BalmStringView& Request::query() {
+BalmStringView& WSGIRequest::query() {
   if(query_)
     return *query_;
   ref_count_++;
-  return query_.emplace(f_free_);
+  return query_.emplace([this](BalmStringView*) { f_free_(this); });
 }
 
 
-int Request::process_url() {
+int WSGIRequest::process_url() {
   std::size_t len {
       unquote_url_inplace(url_._base.utf8, url_._base.utf8_length)};
 
@@ -157,16 +158,23 @@ int Request::process_url() {
   return 0;
 }
 
-BalmStringView& Request::next_header(char* base, size_t len) {
+BalmStringView& WSGIRequest::next_header(char* base, size_t len) {
   ++ref_count_;
-  return headers_.emplace_back(f_free_, base, len).bsv;
+  return headers_
+      .emplace_back(
+          [this](BalmStringView*) {
+            if(!--ref_count_)
+              f_free_(this);
+          },
+          base, len)
+      .bsv;
 }
 
-BalmStringView& Request::last_header() {
+BalmStringView& WSGIRequest::last_header() {
   return headers_.back().bsv;
 }
 
-bool Request::process_header() {
+bool WSGIRequest::process_header() {
   if(!headers_.back().process()) {
     headers_.pop_back();
     --ref_count_;
@@ -175,16 +183,21 @@ bool Request::process_header() {
   return true;
 }
 
-BalmStringView& Request::next_value(char* base, std::size_t len) {
+BalmStringView& WSGIRequest::next_value(char* base, std::size_t len) {
   ++ref_count_;
-  return values_.emplace_back(f_free_, base, len);
+  return values_.emplace_back(
+      [this](BalmStringView*) {
+        if(!--ref_count_)
+          f_free_(this);
+      },
+      base, len);
 }
 
-BalmStringView& Request::last_value() {
+BalmStringView& WSGIRequest::last_value() {
   return values_.back();
 }
 
-asio::mutable_buffer Request::get_read_buf(std::size_t offset,
+asio::mutable_buffer WSGIRequest::get_read_buf(std::size_t offset,
     std::size_t minsize) {
   std::size_t diff {buf_.size() - offset};
   if(diff < minsize)
@@ -193,7 +206,8 @@ asio::mutable_buffer Request::get_read_buf(std::size_t offset,
   return asio::buffer(buf_.data() + offset, buf_.size() - offset);
 }
 
-asio::mutable_buffer Request::get_parse_buf(std::size_t offset, std::size_t n) {
+asio::mutable_buffer WSGIRequest::get_parse_buf(std::size_t offset,
+    std::size_t n) {
   return asio::buffer(buf_.data() + offset, n);
 }
 

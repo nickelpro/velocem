@@ -1,5 +1,5 @@
-#ifndef VELOCEM_WSGIAPP_HPP
-#define VELOCEM_WSGIAPP_HPP
+#ifndef VELOCEM_WSGI_APP_HPP
+#define VELOCEM_WSGI_APP_HPP
 
 #include <optional>
 #include <vector>
@@ -29,10 +29,10 @@ struct WSGIApp {
 
   ~WSGIApp();
 
-  WSGIAppRet* run(Request* req, int http_minor, int meth, bool keepalive);
+  WSGIAppRet* run(WSGIRequest* req, int http_minor, int meth, bool keepalive);
 
 private:
-  PyObject* make_env(Request* req, int http_minor, int meth);
+  PyObject* make_env(WSGIRequest* req, int http_minor, int meth);
 
   std::optional<Py_ssize_t> build_headers(std::vector<char>& buf,
       bool keep_alive);
@@ -64,4 +64,4 @@ private:
 
 } // namespace velocem
 
-#endif // VELOCEM_WSGIAPP_HPP
+#endif // VELOCEM_WSGI_APP_HPP

@@ -1,4 +1,4 @@
-#include "WSGIServer.hpp"
+#include "Server.hpp"
 
 #include <chrono>
 #include <csignal>
@@ -12,12 +12,13 @@
 
 #include <asio.hpp>
 
-#include "Constants.hpp"
 #include "HTTPParser.hpp"
 #include "plat/plat.hpp"
 #include "Request.hpp"
-#include "Util.hpp"
-#include "WSGIApp.hpp"
+#include "util/Constants.hpp"
+#include "util/Util.hpp"
+
+#include "App.hpp"
 
 using asio::awaitable;
 using asio::deferred;
@@ -30,19 +31,22 @@ namespace velocem {
 namespace {
 
 struct {
-  std::queue<QueuedRequest*> q;
+  std::queue<WSGIRequest*> q;
 
-  Request* pop() {
+  WSGIRequest* pop() {
     if(q.empty())
-      return static_cast<Request*>(new QueuedRequest(q));
+      return new WSGIRequest {[&](WSGIRequest* self) {
+        self->reset();
+        q.push(self);
+      }};
     auto ptr = q.front();
     q.pop();
-    return static_cast<Request*>(ptr);
+    return ptr;
   }
 
-  void push(Request* ptr) {
+  void push(WSGIRequest* ptr) {
     ptr->reset();
-    q.push(static_cast<QueuedRequest*>(ptr));
+    q.push(ptr);
   }
 
 } ReqQ;
@@ -88,8 +92,8 @@ asio::awaitable<void> handle_iter(tcp::socket& s, WSGIAppRet& app) {
 }
 
 asio::awaitable<void> client(tcp::socket s, WSGIApp& app) {
-  Request* req {ReqQ.pop()};
-  Request* next_req {nullptr};
+  WSGIRequest* req {ReqQ.pop()};
+  WSGIRequest* next_req {nullptr};
   WSGIAppRet* app_ret {nullptr};
   HTTPParser http {req};
 
@@ -118,7 +122,7 @@ asio::awaitable<void> client(tcp::socket s, WSGIApp& app) {
       }
 
 
-      Request* tmp = req;
+      WSGIRequest* tmp = req;
       req = nullptr;
       app_ret = app.run(tmp, http.http_minor, http.method, http.keep_alive());
 

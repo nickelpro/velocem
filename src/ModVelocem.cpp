@@ -1,8 +1,8 @@
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 
-#include "Constants.hpp"
-#include "WSGIServer.hpp"
+#include "util/Constants.hpp"
+#include "wsgi/Server.hpp"
 
 namespace {
 

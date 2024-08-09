@@ -19,7 +19,7 @@ target_compile_features(velocem PRIVATE cxx_std_23)
 target_compile_definitions(velocem PRIVATE ASIO_DISABLE_VISIBILITY)
 set_target_properties(velocem PROPERTIES CXX_VISIBILITY_PRESET hidden)
 
-if(VELOCEM_USE_IPO)
+if(VELOCEM_USE_IPO AND NOT(CMAKE_BUILD_TYPE STREQUAL Debug))
   include(CheckIPOSupported)
   check_ipo_supported(RESULT ipo OUTPUT ipo_out)
 
@@ -57,7 +57,7 @@ elseif(CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL MSVC)
   target_compile_options(velocem PRIVATE /W3)
 endif()
 
-if(VELOCEM_STRIP AND DEFINED CMAKE_STRIP)
+if(VELOCEM_STRIP AND DEFINED CMAKE_STRIP AND NOT(CMAKE_BUILD_TYPE STREQUAL Debug))
   if(APPLE)
     add_custom_command(TARGET velocem POST_BUILD
       COMMAND ${CMAKE_STRIP} -x $<TARGET_FILE:velocem>

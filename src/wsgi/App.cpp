@@ -1,4 +1,4 @@
-#include "WSGIApp.hpp"
+#include "App.hpp"
 
 #include <charconv>
 #include <chrono>
@@ -19,9 +19,11 @@
 #include <strings.h>
 #endif
 
-#include "Constants.hpp"
+#include "util/Constants.hpp"
+#include "util/Util.hpp"
+
+#include "Input.hpp"
 #include "Request.hpp"
-#include "Util.hpp"
 
 namespace velocem {
 
@@ -426,7 +428,7 @@ WSGIApp::~WSGIApp() {
   Py_DECREF(cap_);
 }
 
-WSGIAppRet* WSGIApp::run(Request* req, int http_minor, int meth,
+WSGIAppRet* WSGIApp::run(WSGIRequest* req, int http_minor, int meth,
     bool keepalive) {
   WSGIAppRet* ret {AppRetQ.pop()};
 
@@ -494,11 +496,12 @@ WSGIAppRet* WSGIApp::run(Request* req, int http_minor, int meth,
   return ret;
 }
 
-PyObject* WSGIApp::make_env(Request* req, int http_minor, int meth) {
+PyObject* WSGIApp::make_env(WSGIRequest* req, int http_minor, int meth) {
   auto env {PyDict_Copy(baseEnv_)};
 
   PyDict_SetItem(env, gPO.meth, gPO.methods[meth]);
   PyDict_SetItem(env, gPO.path, (PyObject*) &req->url());
+  PyDict_SetItem(env, gPO.wsgi_input, (PyObject*) &req->input_);
 
 
   if(req->has_query())
