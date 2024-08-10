@@ -5,6 +5,8 @@
 #include <format>
 #include <string>
 
+#include "BalmStringView.hpp"
+
 namespace velocem {
 
 std::string gRequiredHeaders {std::format(gRequiredHeadersFormat,
@@ -34,6 +36,20 @@ void init_gPO() {
   gPO.methods = {
 #include "defs/http_method.def"
   };
+}
+
+GlobalVelocemTypes gVT;
+
+void init_gVT() {
+  gVT.BalmStringViewType = PyUnicode_Type;
+  gVT.BalmStringViewType.tp_new = nullptr;
+  gVT.BalmStringViewType.tp_free = nullptr;
+  gVT.BalmStringViewType.tp_dealloc = BalmStringView::dealloc;
+}
+
+void init_globals() {
+  init_gPO();
+  init_gVT();
 }
 
 } // namespace velocem

@@ -39,6 +39,16 @@ extern GlobalPythonObjects gPO;
 
 void init_gPO();
 
+struct GlobalVelocemTypes {
+  PyTypeObject BalmStringViewType;
+};
+
+extern GlobalVelocemTypes gVT;
+
+void init_gVT();
+
+void init_globals();
+
 } // namespace velocem
 
 #endif // VELOCEM_CONSTANTS_HPP

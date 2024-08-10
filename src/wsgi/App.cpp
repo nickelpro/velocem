@@ -554,6 +554,16 @@ std::optional<Py_ssize_t> WSGIApp::build_headers(std::vector<char>& buf,
   return ret;
 }
 
+namespace {
+constexpr const char* _sr_keywords[] {"status", "response_headers", "exc_info",
+    nullptr};
+
+_PyArg_Parser _sr_parser {
+    .format = "OO|O:start_response",
+    .keywords = _sr_keywords,
+};
+} // namespace
+
 PyObject* WSGIApp::start_response(PyObject* const* args, Py_ssize_t nargs,
     PyObject* kwnames) {
 
@@ -561,14 +571,7 @@ PyObject* WSGIApp::start_response(PyObject* const* args, Py_ssize_t nargs,
   PyObject* status;
   PyObject* headers;
 
-  static const char* _keywords[] {"status", "response_headers", "exc_info",
-      nullptr};
-  static _PyArg_Parser _parser {
-      .format = "OO|O:start_response",
-      .keywords = _keywords,
-  };
-
-  if(!_PyArg_ParseStackAndKeywords(args, nargs, kwnames, &_parser, &status,
+  if(!_PyArg_ParseStackAndKeywords(args, nargs, kwnames, &_sr_parser, &status,
          &headers, &exc_info))
     return nullptr;
 

@@ -192,7 +192,7 @@ void accept(asio::execution::executor auto ex, std::string_view host,
 }
 
 asio::awaitable<void> handle_header(asio::io_context& io) {
-  static std::chrono::seconds interval {1};
+  constexpr std::chrono::seconds interval {1};
 
   asio::steady_timer timer {io};
 
@@ -227,19 +227,21 @@ asio::awaitable<void> handle_signals(asio::io_context& io) {
   std::signal(SIGTERM, old_sigterm);
 }
 
+constexpr const char* _rs_keywords[] {"app", "host", "port", "reuseport",
+    nullptr};
+_PyArg_Parser _rs_parser {.format = "O|ssp:run", .keywords = _rs_keywords};
+
 } // namespace
 
 PyObject* run_wsgi_server(PyObject* /* self */, PyObject* const* args,
     Py_ssize_t nargs, PyObject* kwnames) {
-  static const char* keywords[] {"app", "host", "port", "reuseport", nullptr};
-  static _PyArg_Parser parser {.format = "O|ssp:run", .keywords = keywords};
 
   PyObject* appObj;
   const char* host {"localhost"};
   const char* port {"8000"};
   int reuseport {0};
 
-  if(!_PyArg_ParseStackAndKeywords(args, nargs, kwnames, &parser, &appObj,
+  if(!_PyArg_ParseStackAndKeywords(args, nargs, kwnames, &_rs_parser, &appObj,
          &host, &port, &reuseport))
     return nullptr;
 

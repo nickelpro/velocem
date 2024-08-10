@@ -9,6 +9,8 @@
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 
+#include "Constants.hpp"
+
 namespace velocem {
 
 struct BalmStringView : PyUnicodeObject {
@@ -16,19 +18,11 @@ struct BalmStringView : PyUnicodeObject {
       char* base = nullptr, std::size_t length = 0)
       : f_dealloc {f_dealloc} {
 
-    static PyTypeObject type = []() {
-      PyTypeObject ret = PyUnicode_Type;
-      ret.tp_new = nullptr;
-      ret.tp_free = nullptr;
-      ret.tp_dealloc = dealloc;
-      return ret;
-    }();
-
     data.any = base;
     _base = {
         ._base =
             {
-                .ob_base = {.ob_type = &type},
+                .ob_base = {.ob_type = &gVT.BalmStringViewType},
                 .length = (Py_ssize_t) length,
                 .state = {.kind = PyUnicode_1BYTE_KIND, .ascii = 1},
             },
@@ -55,6 +49,8 @@ struct BalmStringView : PyUnicodeObject {
   }
 
 private:
+  friend void init_gVT();
+
   const std::function<void(BalmStringView*)> f_dealloc;
 
   static void dealloc(PyObject* self) {

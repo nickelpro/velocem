@@ -17,7 +17,7 @@ namespace {
 std::size_t unquote_url_inplace(char* url, size_t len) {
 
   // clang-format off
-  static const char tbl[256] {
+  constexpr char tbl[256] {
       -1,-1,-1,-1,-1,-1,-1,-1, -1,-1,-1,-1,-1,-1,-1,-1,
       -1,-1,-1,-1,-1,-1,-1,-1, -1,-1,-1,-1,-1,-1,-1,-1,
       -1,-1,-1,-1,-1,-1,-1,-1, -1,-1,-1,-1,-1,-1,-1,-1,
