@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.25)
 
 include(cmake/BootstrapVcpkg.cmake)
 
-project(velocem LANGUAGES C CXX VERSION 0.0.10)
+project(velocem LANGUAGES C CXX VERSION 0.0.11)
 
 option(VELOCEM_USE_IO_URING "Use io_uring on Linux" ON)
 option(VELOCEM_USE_IPO "Use interprocedural optimization if supported" ON)
