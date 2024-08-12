@@ -46,7 +46,7 @@ llhttp_errno_t HTTPParser::parse(char* data, std::size_t len) {
   auto ret {llhttp_execute(static_cast<llhttp_t*>(this), data, len)};
   if(ret != HPE_OK && ret != HPE_PAUSED)
     throw std::runtime_error {"HTTP error"};
-  return llhttp_execute(static_cast<llhttp_t*>(this), data, len);
+  return ret;
 }
 
 llhttp_errno_t HTTPParser::resume(WSGIRequest* req,
