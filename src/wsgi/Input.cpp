@@ -17,9 +17,9 @@ namespace velocem {
 WSGIInput::WSGIInput(std::function<void(WSGIInput*)> f_dealloc)
     : f_dealloc_ {f_dealloc} {
   static std::array<PyMethodDef, 4> meths {
-      PyMethodDef {"read", (PyCFunction) read},
-      {"readline", (PyCFunction) readline},
-      {"readlines", (PyCFunction) readlines},
+      PyMethodDef {"read", (PyCFunction) read, METH_FASTCALL},
+      {"readline", (PyCFunction) readline, METH_FASTCALL},
+      {"readlines", (PyCFunction) readlines, METH_FASTCALL},
       {nullptr, nullptr},
   };
 
@@ -62,8 +62,9 @@ PyObject* WSGIInput::read(WSGIInput* self, PyObject* const* args,
   if(size >= 0 && size < len)
     len = size;
 
+  auto ret = PyBytes_FromStringAndSize(self->it_, len);
   self->it_ += len;
-  return PyBytes_FromStringAndSize(self->it_, len);
+  return ret;
 }
 
 PyObject* WSGIInput::iternext(WSGIInput* self) {
@@ -77,8 +78,9 @@ PyObject* WSGIInput::iternext(WSGIInput* self) {
   if(nl)
     len = (nl - cur) + 1;
 
+  auto ret = PyBytes_FromStringAndSize(self->it_, len);
   self->it_ += len;
-  return PyBytes_FromStringAndSize(cur, len);
+  return ret;
 }
 
 PyObject* WSGIInput::readline(WSGIInput* self, PyObject* const* args,
@@ -100,8 +102,9 @@ PyObject* WSGIInput::readline(WSGIInput* self, PyObject* const* args,
   if(size >= 0 && len > size)
     len = size;
 
+  auto ret = PyBytes_FromStringAndSize(self->it_, len);
   self->it_ += len;
-  return PyBytes_FromStringAndSize(cur, len);
+  return ret;
 }
 
 PyObject* WSGIInput::readlines(WSGIInput* self, PyObject* const* args,
