@@ -63,7 +63,7 @@ jobs:
       - name: Install Dependencies
         run: |
           pacman --noconfirm -Syu
-          pacman --noconfirm -S python-pipx ninja cmake git curl zip unzip tar
+          pacman --noconfirm -S python-pipx ninja cmake git zip unzip
 
       - name: Build
         run: |
