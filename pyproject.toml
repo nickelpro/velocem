@@ -36,6 +36,7 @@ build_type = "Release"
 build_args = ["-j"]
 
 [tool.py-build-cmake.linux.cmake.options]
+"VCPKG_TARGET_TRIPLET:STRING" = "x64-linux-release-lto"
 "VCPKG_MANIFEST_FEATURES:STRING" = "vcpkg-uring"
 "VELOCEM_USE_IO_URING:BOOL" = "ON"
 
