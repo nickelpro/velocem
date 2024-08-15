@@ -31,7 +31,7 @@ if(VELOCEM_USE_IPO AND NOT(CMAKE_BUILD_TYPE STREQUAL Debug))
     set_property(TARGET velocem PROPERTY INTERPROCEDURAL_OPTIMIZATION ON)
 
     if(CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
-      target_compile_options(velocem PRIVATE /Gw)
+      target_compile_options(velocem PRIVATE /Gy /Gw)
       target_link_options(velocem PRIVATE /OPT:ICF=3)
     endif()
 
