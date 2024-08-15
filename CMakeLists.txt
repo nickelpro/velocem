@@ -9,12 +9,16 @@ option(VELOCEM_USE_IPO "Use interprocedural optimization if supported" ON)
 option(VELOCEM_STRIP "Run system strip on compiled module" ON)
 set(VELOCEM_WIN_SDK_VER 0x0A00 CACHE STRING "Windows SDK macro version")
 
-find_package(Python3 3.12 REQUIRED COMPONENTS Development.Module)
 find_package(asio CONFIG REQUIRED)
 find_package(llhttp CONFIG REQUIRED)
+find_package(Python3 3.12 REQUIRED COMPONENTS Development.Module)
 
 Python3_add_library(velocem MODULE)
-target_link_libraries(velocem PRIVATE asio::asio llhttp::llhttp_static Python3::Module)
+target_link_libraries(velocem PRIVATE
+  asio::asio
+  llhttp::llhttp_static
+  Python3::Module
+)
 target_compile_features(velocem PRIVATE cxx_std_23)
 target_compile_definitions(velocem PRIVATE ASIO_DISABLE_VISIBILITY)
 set_target_properties(velocem PROPERTIES CXX_VISIBILITY_PRESET hidden)
@@ -25,6 +29,12 @@ if(VELOCEM_USE_IPO AND NOT(CMAKE_BUILD_TYPE STREQUAL Debug))
 
   if(ipo)
     set_property(TARGET velocem PROPERTY INTERPROCEDURAL_OPTIMIZATION ON)
+
+    if(CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+      target_compile_options(velocem PRIVATE /Gw)
+      target_link_options(velocem PRIVATE /OPT:ICF=3)
+    endif()
+
   else()
     message(WARNING "IPO is not supported: ${ipo_out}")
   endif()
@@ -39,13 +49,12 @@ if(LINUX AND VELOCEM_USE_IO_URING)
     ASIO_DISABLE_EPOLL
     ASIO_HAS_IO_URING
   )
-
   find_package(PkgConfig)
   pkg_check_modules(liburing REQUIRED IMPORTED_TARGET liburing>=2.0)
   target_link_libraries(velocem PRIVATE PkgConfig::liburing)
 endif()
 
-if(CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL GNU)
+if(CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "GNU")
   target_compile_options(velocem PRIVATE
     -Wall -Wextra -Wno-missing-field-initializers -Wno-cast-function-type
   )
@@ -53,7 +62,7 @@ if(CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL GNU)
   if(NOT APPLE)
     target_link_options(velocem PRIVATE -Wl,--exclude-libs,ALL)
   endif()
-elseif(CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL MSVC)
+elseif(CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
   target_compile_options(velocem PRIVATE /W3)
 endif()
 

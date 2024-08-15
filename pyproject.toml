@@ -45,5 +45,5 @@ build_args = ["-j"]
 "CMAKE_OSX_DEPLOYMENT_TARGET:STRING" = "13.3"
 
 [tool.py-build-cmake.windows.cmake.options]
-"VCPKG_TARGET_TRIPLET:STRING" = "x64-windows-static"
+"VCPKG_TARGET_TRIPLET:STRING" = "x64-windows-release-lto"
 "CMAKE_MSVC_RUNTIME_LIBRARY:STRING" = "MultiThreaded"
