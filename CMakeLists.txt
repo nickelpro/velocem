@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.25)
 
-include(cmake/BootstrapVcpkg.cmake)
+include(vcpkg/BootstrapVcpkg.cmake)
 
 project(velocem LANGUAGES C CXX VERSION 0.0.11)
 
