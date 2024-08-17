@@ -17,6 +17,8 @@ struct WSGIInput : PyObject {
   void set_body(char* begin, std::size_t len);
   void extend_body(std::size_t len);
 
+  void reset();
+
 private:
   static void dealloc(WSGIInput* self);
 
@@ -32,8 +34,8 @@ private:
       Py_ssize_t nargs);
 
   std::function<void(WSGIInput*)> f_dealloc_;
-  char* it_;
-  char* end_;
+  char* it_ {nullptr};
+  char* end_ {nullptr};
 };
 
 } // namespace velocem

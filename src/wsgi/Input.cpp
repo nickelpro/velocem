@@ -44,7 +44,13 @@ void WSGIInput::extend_body(std::size_t len) {
   end_ += len;
 }
 
+void WSGIInput::reset() {
+  it_ = nullptr;
+  end_ = nullptr;
+}
+
 void WSGIInput::dealloc(WSGIInput* self) {
+  self->reset();
   self->f_dealloc_(self);
 }
 
