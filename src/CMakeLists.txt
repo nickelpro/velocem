@@ -1,9 +1,23 @@
 target_sources(velocem PRIVATE
   HTTPParser.cpp
   ModVelocem.cpp
-)
 
-target_include_directories(velocem PRIVATE ${CMAKE_CURRENT_LIST_DIR})
+  PRIVATE FILE_SET HEADERS
+  BASE_DIRS ${CMAKE_CURRENT_LIST_DIR}
+
+  FILES
+  HTTPParser.hpp
+
+  plat/plat.hpp
+
+  util/Constants.hpp
+  util/Util.hpp
+
+  wsgi/App.hpp
+  wsgi/Input.hpp
+  wsgi/Request.hpp
+  wsgi/Server.hpp
+)
 
 add_subdirectory(plat)
 add_subdirectory(util)
