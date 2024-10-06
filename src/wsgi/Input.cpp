@@ -16,23 +16,8 @@ namespace velocem {
 
 WSGIInput::WSGIInput(std::function<void(WSGIInput*)> f_dealloc)
     : f_dealloc_ {f_dealloc} {
-  static std::array<PyMethodDef, 4> meths {
-      PyMethodDef {"read", (PyCFunction) read, METH_FASTCALL},
-      {"readline", (PyCFunction) readline, METH_FASTCALL},
-      {"readlines", (PyCFunction) readlines, METH_FASTCALL},
-      {nullptr, nullptr},
-  };
-
-  static PyTypeObject type {
-      .tp_name = "VelocemWSGIInput",
-      .tp_dealloc = (destructor) dealloc,
-      .tp_iter = PyObject_SelfIter,
-      .tp_iternext = (iternextfunc) iternext,
-      .tp_methods = meths.data(),
-  };
-
   ob_refcnt = 0;
-  ob_type = &type;
+  ob_type = &gVT.WSGIInputType;
 }
 
 void WSGIInput::set_body(char* begin, std::size_t len) {
@@ -47,6 +32,24 @@ void WSGIInput::extend_body(std::size_t len) {
 void WSGIInput::reset() {
   it_ = nullptr;
   end_ = nullptr;
+}
+
+void WSGIInput::init_type(PyTypeObject* WSGIInputType) {
+  static std::array<PyMethodDef, 4> meths {
+      PyMethodDef {"read", (PyCFunction) read, METH_FASTCALL},
+      {"readline", (PyCFunction) readline, METH_FASTCALL},
+      {"readlines", (PyCFunction) readlines, METH_FASTCALL},
+      {nullptr, nullptr},
+  };
+
+  *WSGIInputType = PyTypeObject {
+      .tp_name = "VelocemWSGIInput",
+      .tp_dealloc = (destructor) dealloc,
+      .tp_iter = PyObject_SelfIter,
+      .tp_iternext = (iternextfunc) iternext,
+      .tp_methods = meths.data(),
+  };
+  PyType_Ready(WSGIInputType);
 }
 
 void WSGIInput::dealloc(WSGIInput* self) {

@@ -16,7 +16,9 @@ def wait_for_server(server, port, sleep=5):
       break
 
 
-def run_req_test(f, req='http://localhost:8000', reps=10):
+def run_req_test(f, req='http://localhost:8000', reps=10, *, endpoint=''):
+  if isinstance(req, str):
+    req += endpoint
   for _ in repeat(None, 10):
     with request.urlopen(req) as resp:
       f(resp)

@@ -16,7 +16,7 @@ namespace velocem {
 struct BalmStringView : PyUnicodeObject {
   BalmStringView(std::function<void(BalmStringView*)> f_dealloc,
       char* base = nullptr, std::size_t length = 0)
-      : f_dealloc {f_dealloc} {
+      : f_dealloc_ {f_dealloc} {
 
     data.any = base;
     _base = {
@@ -49,13 +49,19 @@ struct BalmStringView : PyUnicodeObject {
   }
 
 private:
-  friend void init_gVT();
+  friend void init_gVT(PyObject* mod);
+  static void init_type(PyTypeObject* BalmStringViewType) {
+    *BalmStringViewType = PyUnicode_Type;
+    BalmStringViewType->tp_new = nullptr;
+    BalmStringViewType->tp_free = nullptr;
+    BalmStringViewType->tp_dealloc = BalmStringView::dealloc;
+  }
 
-  const std::function<void(BalmStringView*)> f_dealloc;
+  const std::function<void(BalmStringView*)> f_dealloc_;
 
   static void dealloc(PyObject* self) {
     auto ptr {reinterpret_cast<BalmStringView*>(self)};
-    ptr->f_dealloc(ptr);
+    ptr->f_dealloc_(ptr);
   }
 };
 

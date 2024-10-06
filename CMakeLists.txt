@@ -9,12 +9,14 @@ option(VELOCEM_USE_IPO "Use interprocedural optimization if supported" ON)
 option(VELOCEM_STRIP "Run system strip on compiled module" ON)
 set(VELOCEM_WIN_SDK_VER 0x0A00 CACHE STRING "Windows SDK macro version")
 
+find_package(absl CONFIG REQUIRED)
 find_package(asio CONFIG REQUIRED)
 find_package(llhttp CONFIG REQUIRED)
 find_package(Python3 3.12 REQUIRED COMPONENTS Development.Module)
 
 Python3_add_library(velocem MODULE)
 target_link_libraries(velocem PRIVATE
+  absl::flat_hash_map
   asio::asio
   llhttp::llhttp_static
   Python3::Module

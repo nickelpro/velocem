@@ -7,6 +7,7 @@ target_sources(velocem PRIVATE
 
   FILES
   HTTPParser.hpp
+  Router.hpp
 
   plat/plat.hpp
 

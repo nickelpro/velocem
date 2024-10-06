@@ -48,6 +48,8 @@ private:
   static PyObject* write_cb_tr(PyObject* self, PyObject* const* args,
       Py_ssize_t nargs);
 
+  static PyObject* err_call(PyObject*, PyObject* const*, Py_ssize_t);
+
   bool in_handle;
   std::vector<char> writebuf_;
 

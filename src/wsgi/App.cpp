@@ -422,6 +422,14 @@ WSGIApp::WSGIApp(PyObject* app, const char* host, const char* port)
 }
 
 WSGIApp::~WSGIApp() {
+  static PyMethodDef errdef {
+      .ml_name = "WSGIAppBadCall",
+      .ml_meth = (PyCFunction) err_call,
+      .ml_flags = METH_FASTCALL,
+  };
+  ((PyCFunctionObject*) sr_)->m_ml = &errdef;
+  ((PyCFunctionObject*) wcb_)->m_ml = &errdef;
+
   Py_DECREF(baseEnv_);
   Py_DECREF(sr_);
   Py_DECREF(wcb_);
@@ -452,6 +460,11 @@ WSGIAppRet* WSGIApp::run(WSGIRequest* req, int http_minor, int meth,
 
     if(!iter) [[unlikely]]
       throw std::runtime_error {"Python function call error"};
+
+    if(!status_) [[unlikely]] {
+      PyErr_SetString(PyExc_RuntimeError, "start_response() not called");
+      throw std::runtime_error {"WSGI application error"};
+    }
 
     if(PyGen_Check(iter)) {
       PyObject* first {prime_generator(iter)};
@@ -626,4 +639,10 @@ PyObject* WSGIApp::write_cb_tr(PyObject* self, PyObject* const* args,
   return (static_cast<WSGIApp*>(pyapp))->write_cb(args, nargs);
 }
 
+PyObject* WSGIApp::err_call(PyObject*, PyObject* const*, Py_ssize_t) {
+  PyErr_SetString(PyExc_TypeError,
+      "WSGI application function (`start_response` or `write`) called outside "
+      "WSGI application lifetime");
+  return nullptr;
+}
 } // namespace velocem

@@ -8,8 +8,14 @@
   ],
   "license": "MIT-0",
   "dependencies": [
-    "llhttp",
-    "asio"
+    {
+      "name": "abseil",
+      "features": [
+        "cxx17"
+      ]
+    },
+    "asio",
+    "llhttp"
   ],
   "features": {
     "vcpkg-uring": {

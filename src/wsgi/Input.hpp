@@ -20,6 +20,9 @@ struct WSGIInput : PyObject {
   void reset();
 
 private:
+  friend void init_gVT(PyObject* mod);
+  static void init_type(PyTypeObject* WSGIINputType);
+
   static void dealloc(WSGIInput* self);
 
   static PyObject* read(WSGIInput* self, PyObject* const* args,
