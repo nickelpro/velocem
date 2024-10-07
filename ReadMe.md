@@ -61,19 +61,33 @@ more performant techniques as well.
 
 * **HTTP/1.1**: We parse it and return valid responses. Yippee.
 
+* **Router**: Routing is what massacres most benchmarks. The "Hello World"
+  Flask app is 5x slower than the raw WSGI equivalent. A fast router is
+  essential to a fast, low latency application.
+
+  Velocem has a _very basic_ router, but it should still be faster than most
+  other implementations. This needs a lot of expansion.
+
+* **Tests**: There are a couple of tests. The current testing strategy is "when
+  she segfaults, write a test so the same segfault doesn't happen again".
+  Obviously more work to come here.
+
+* **PyPI**: Velocem is available via PyPI, but as this is pre-alpha software and
+  features and fixes make there way in with every single commit, building from
+  source is recommended for those who want to play with this.
+
 ## What's On Deck
 
-* **Tests and Benchmarks**: Need to clean these up and get them into the repo.
+* **Docs**: Yes, obviously.
+
+* **Benchmarks**: Need a more complete suite of benchmarks than "Ctrl-R for the
+  last `wrk` command we ran"
 
 * **sendfile**: The single most obvious WSGI optimization, but needs special
 handling code
 
 * **ASGI**: Will likely only support the latest standard. Going to need to
 implement our own asyncio loop for this to have any shot of being fast.
-
-* **Router**: Routing is what massacres most benchmarks. The "Hello World"
-  Flask app is 5x slower than the raw WSGI equivalent. A fast router is
-  essential to a fast, low latency application.
 
 * **uwsgi Protocol**: HTTP/1.1 is non-ideal as a lingua franca for web
   application backends, uwsgi is an improvement worth exploring.
