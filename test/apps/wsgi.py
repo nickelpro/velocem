@@ -3,6 +3,12 @@ import velocem
 router = velocem.Router()
 
 
+@router.get('/')
+def root(environ, start_response):
+  start_response('200 OK', [])
+  return b''
+
+
 @router.get('/hello')
 def hello(environ, start_response):
   start_response('200 OK', [])
@@ -23,6 +29,28 @@ def echo(environ, start_response):
       headers.append((key[5:], val))
   start_response('200 OK', headers)
   return environ['wsgi.input'].read()
+
+
+@router.get('/no_start_response')
+def no_start_response(environ, start_response):
+  return b'Hello World'
+
+
+@router.get('/invalid_body')
+def invalid_body(environ, start_response):
+  start_response('200 OK', [])
+  return None
+
+
+@router.get('/raise_exception_before_sr')
+def raise_exception_before_sr(environ, start_response):
+  raise RuntimeError('Test Exception')
+
+
+@router.get('/raise_exception_after_sr')
+def raise_exception_after_sr(environ, start_response):
+  start_response('200 OK', [])
+  raise RuntimeError('Test Exception')
 
 
 def app(environ, start_response):

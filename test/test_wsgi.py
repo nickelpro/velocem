@@ -5,7 +5,7 @@ from urllib import request
 import velocem
 
 from apps import wsgi
-from util import wait_for_server, run_req_test
+from util import wait_for_server, run_req_test, run_fail_test
 
 
 @pytest.fixture(scope='module')
@@ -15,6 +15,13 @@ def wsgi_server():
   wait_for_server('localhost', 8000)
   yield p
   p.kill()
+
+
+def root_OK():
+  def f(resp):
+    assert resp.read() == b''
+
+  run_req_test(f)
 
 
 def test_hello_world(wsgi_server):
@@ -46,3 +53,23 @@ def test_required_headers(wsgi_server):
     assert bool(resp.headers['Date'])
 
   run_req_test(f, endpoint='/hello')
+
+
+def test_no_start_response(wsgi_server):
+  run_fail_test(endpoint='/no_start_response')
+  root_OK()
+
+
+def test_invalid_body(wsgi_server):
+  run_fail_test(endpoint='/invalid_body')
+  root_OK()
+
+
+def test_raise_exception_before_sr(wsgi_server):
+  run_fail_test(endpoint='/raise_exception_before_sr')
+  root_OK()
+
+
+def test_raise_exception_after_sr(wsgi_server):
+  run_fail_test(endpoint='/raise_exception_after_sr')
+  root_OK()
