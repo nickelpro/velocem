@@ -27,7 +27,7 @@ build-backend = "py_build_cmake.build"
 generated = "module"
 
 [tool.py-build-cmake.sdist]
-include = ["CMakeLists.txt", "vcpkg.json", "cmake", "src"]
+include = ["CMakeLists.txt", "vcpkg.json", "src", "vcpkg"]
 
 [tool.py-build-cmake.cmake]
 minimum_version = "3.17"
