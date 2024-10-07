@@ -5,7 +5,7 @@ from itertools import repeat
 from urllib import request, error
 
 
-def wait_for_server(server, port, sleep=5):
+def wait_for_server(server, port, sleep=0.5):
   while True:
     try:
       s = socket.create_connection((server, port))

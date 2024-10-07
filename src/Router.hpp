@@ -3,6 +3,7 @@
 
 #include <array>
 #include <memory>
+#include <optional>
 #include <ranges>
 #include <string_view>
 #include <utility>
@@ -63,12 +64,13 @@ struct Router : PyObject {
 private:
   friend void init_gVT(PyObject* mod);
   static void init_type(PyTypeObject* RouterType) {
-    static std::array<PyMethodDef, 6> meths {
+    static std::array<PyMethodDef, 7> meths {
         PyMethodDef {"get", (PyCFunction) get, METH_FASTCALL},
         PyMethodDef {"post", (PyCFunction) post, METH_FASTCALL},
         PyMethodDef {"put", (PyCFunction) put, METH_FASTCALL},
         PyMethodDef {"delete", (PyCFunction) delete_, METH_FASTCALL},
         PyMethodDef {"get_route", (PyCFunction) get_route, METH_FASTCALL},
+        PyMethodDef {"wsgi_app", (PyCFunction) wsgi_app, METH_FASTCALL},
         {nullptr, nullptr},
     };
 
@@ -136,6 +138,43 @@ private:
     op->pyo = app;
   }
 
+  std::optional<std::pair<PyObject*, PyObject*>> _get_route(PyObject* meth,
+      PyObject* route) {
+    Py_ssize_t sz;
+    const char* c {PyUnicode_AsUTF8AndSize(meth, &sz)};
+    HTTPMethod hmeth {str2meth({c, static_cast<std::size_t>(sz)})};
+
+    c = {PyUnicode_AsUTF8AndSize(route, &sz)};
+    auto r {get_app(hmeth, {c, static_cast<std::size_t>(sz)})};
+    if(!r.first) {
+      PyErr_SetString(PyExc_TypeError, "No such route");
+      return {};
+    }
+
+    PyObject* dict {_PyDict_NewPresized(r.second.size())};
+    if(!dict)
+      return {};
+
+    for(auto& [key, val] : r.second) {
+      PyObject* k {PyUnicode_FromStringAndSize(key.data(), key.size())};
+      if(!k) {
+        Py_DECREF(dict);
+        return {};
+      }
+      PyObject* v {PyUnicode_FromStringAndSize(val.data(), val.size())};
+      if(!v) {
+        Py_DECREF(k);
+        Py_DECREF(dict);
+        return {};
+      }
+      PyDict_SetItem(dict, k, v);
+      Py_DECREF(k);
+      Py_DECREF(v);
+    }
+
+    return std::pair {r.first, dict};
+  }
+
   static PyObject* get_route(Router* self, PyObject* const* args,
       Py_ssize_t nargs) {
     PyObject* meth;
@@ -144,40 +183,12 @@ private:
            &PyUnicode_Type, &route))
       return nullptr;
 
-    Py_ssize_t sz;
-    const char* c {PyUnicode_AsUTF8AndSize(meth, &sz)};
-    HTTPMethod hmeth {str2meth({c, static_cast<std::size_t>(sz)})};
-
-    c = {PyUnicode_AsUTF8AndSize(route, &sz)};
-    auto r {self->get_app(hmeth, {c, static_cast<std::size_t>(sz)})};
-    if(!r.first) {
-      PyErr_SetString(PyExc_TypeError, "No such route");
-      return nullptr;
-    }
-
-    PyObject* dict {_PyDict_NewPresized(r.second.size())};
-    if(!dict)
+    auto rt {self->_get_route(meth, route)};
+    if(!rt)
       return nullptr;
 
-    for(auto& [key, val] : r.second) {
-      PyObject* k {PyUnicode_FromStringAndSize(key.data(), key.size())};
-      if(!k) {
-        Py_DECREF(dict);
-        return nullptr;
-      }
-      PyObject* v {PyUnicode_FromStringAndSize(val.data(), val.size())};
-      if(!v) {
-        Py_DECREF(k);
-        Py_DECREF(dict);
-        return nullptr;
-      }
-      PyDict_SetItem(dict, k, v);
-      Py_DECREF(k);
-      Py_DECREF(v);
-    }
-
-    PyObject* tp {PyTuple_Pack(2, r.first, dict)};
-    Py_DECREF(dict);
+    PyObject* tp {PyTuple_Pack(2, rt->first, rt->second)};
+    Py_DECREF(rt->second);
     return tp;
   }
 
@@ -235,6 +246,44 @@ private:
     const char* c {PyUnicode_AsUTF8AndSize(rg->route, &sz)};
     rg->router->reg_route(rg->meth, {c, static_cast<std::size_t>(sz)}, pyo);
     return pyo;
+  }
+
+  static PyObject* wsgi_app(Router* self, PyObject* const* args,
+      Py_ssize_t nargs) {
+    PyObject* ws_env;
+    PyObject* start_response;
+
+    if(!_PyArg_ParseStack(args, nargs, "O!O:wsgi_app", &PyDict_Type, &ws_env,
+           &start_response))
+      return nullptr;
+
+    PyObject* meth {PyDict_GetItemWithError(ws_env, gPO.meth)};
+    if(!meth) {
+      if(!PyErr_Occurred())
+        PyErr_SetString(PyExc_TypeError,
+            "environ does not contain 'REQUEST_METHOD'");
+      return nullptr;
+    }
+
+    PyObject* path {PyDict_GetItemWithError(ws_env, gPO.path)};
+    if(!path) {
+      if(!PyErr_Occurred())
+        PyErr_SetString(PyExc_TypeError,
+            "environ does not contain 'PATH_INFO'");
+      return nullptr;
+    }
+
+    auto rt {self->_get_route(meth, path)};
+    if(!rt)
+      return nullptr;
+
+    int err {PyDict_SetItem(ws_env, gPO.velocem_caps, rt->second)};
+    Py_DECREF(rt->second);
+    if(err)
+      return nullptr;
+
+    return PyObject_CallFunctionObjArgs(rt->first, ws_env, start_response,
+        nullptr);
   }
 
   static void dealloc_node(Node& node) {

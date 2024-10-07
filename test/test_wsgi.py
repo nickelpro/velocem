@@ -3,14 +3,18 @@ import multiprocessing
 from urllib import request
 
 import velocem
-
 from apps import wsgi
+
 from util import wait_for_server, run_req_test, run_fail_test
+
+
+def serv():
+  velocem.wsgi(wsgi.app)
 
 
 @pytest.fixture(scope='module')
 def wsgi_server():
-  p = multiprocessing.Process(target=velocem.wsgi, args=(wsgi.app, ))
+  p = multiprocessing.Process(target=serv)
   p.start()
   wait_for_server('localhost', 8000)
   yield p

@@ -53,10 +53,7 @@ def raise_exception_after_sr(environ, start_response):
   raise RuntimeError('Test Exception')
 
 
-def app(environ, start_response):
-  h, _ = router.get_route(environ['REQUEST_METHOD'], environ['PATH_INFO'])
-  return h(environ, start_response)
-
+app = router.wsgi_app
 
 if __name__ == '__main__':
   velocem.wsgi(app)

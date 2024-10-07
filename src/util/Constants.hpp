@@ -87,6 +87,7 @@ struct GlobalPythonObjects {
   PyObject* meth;
   PyObject* wsgi_ver;
   PyObject* wsgi_input;
+  PyObject* velocem_caps;
   std::array<PyObject*, 47> methods;
 };
 
