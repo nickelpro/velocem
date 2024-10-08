@@ -28,11 +28,38 @@ def root_OK():
   run_req_test(f)
 
 
-def test_hello_world(wsgi_server):
-  def f(resp):
-    assert resp.read() == b'Hello World'
+def check_hello(resp):
+  assert resp.read() == b'Hello World'
 
-  run_req_test(f, endpoint='/hello')
+
+def test_hello_world(wsgi_server):
+  run_req_test(check_hello, endpoint='/hello')
+
+
+def test_list(wsgi_server):
+  run_req_test(check_hello, endpoint='/list')
+
+
+def test_tuple(wsgi_server):
+  run_req_test(check_hello, endpoint='/tuple')
+
+
+def test_iterator(wsgi_server):
+  run_req_test(check_hello, endpoint='/iterator')
+
+
+def test_generator(wsgi_server):
+  run_req_test(check_hello, endpoint='/generator')
+
+
+def test_call_close(wsgi_server):
+  run_req_test(check_hello, endpoint='/call_close')
+
+  def f(resp):
+    val = int(resp.read().decode('ascii'))
+    assert val == 10
+
+  run_req_test(f, endpoint='/called_close')
 
 
 def test_echo(wsgi_server):

@@ -8,6 +8,8 @@
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 
+#include "Constants.hpp"
+
 namespace velocem {
 
 void unpack_unicode(PyObject* str, const char** base, Py_ssize_t* len,
@@ -120,12 +122,20 @@ void replace_key(PyObject* dict, PyObject* oldK, PyObject* newK) {
 }
 
 void close_iterator(PyObject* iter) {
-  PyObject* close {PyObject_GetAttrString(iter, "close")};
-  if(close) {
-    PyObject* ret {PyObject_CallNoArgs(close)};
-    Py_XDECREF(ret);
-    Py_DECREF(close);
-  }
+  if(!PyObject_HasAttr(iter, gPO.close))
+    return;
+
+  PyObject* close {PyObject_GetAttr(iter, gPO.close)};
+  if(!close)
+    throw std::runtime_error {"Python GetAttr error"};
+
+  PyObject* ret {PyObject_CallNoArgs(close)};
+  Py_DECREF(close);
+
+  if(!ret)
+    throw std::runtime_error {"Python close error"};
+
+  Py_DECREF(ret);
 }
 
 } // namespace velocem

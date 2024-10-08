@@ -461,13 +461,12 @@ WSGIAppRet* WSGIApp::run(WSGIRequest* req, int http_minor, int meth,
     if(!iter) [[unlikely]]
       throw std::runtime_error {"Python function call error"};
 
-    if(!status_) [[unlikely]] {
-      PyErr_SetString(PyExc_RuntimeError, "start_response() not called");
-      throw std::runtime_error {"WSGI application error"};
-    }
-
     if(PyGen_Check(iter)) {
       PyObject* first {prime_generator(iter)};
+      if(!status_) [[unlikely]] {
+        PyErr_SetString(PyExc_RuntimeError, "start_response() not called");
+        throw std::runtime_error {"WSGI application error"};
+      }
       ret->conlen = build_headers(ret->buf, keepalive);
 
       // Once we've built the headers you don't get to change them anymore
@@ -479,6 +478,10 @@ WSGIAppRet* WSGIApp::run(WSGIRequest* req, int http_minor, int meth,
         insert_body_generator(ret->buf, writebuf_, iter, first, *ret->conlen);
 
     } else {
+      if(!status_) [[unlikely]] {
+        PyErr_SetString(PyExc_RuntimeError, "start_response() not called");
+        throw std::runtime_error {"WSGI application error"};
+      }
       ret->conlen = build_headers(ret->buf, keepalive);
       in_handle = false;
 

@@ -31,6 +31,84 @@ def echo(environ, start_response):
   return environ['wsgi.input'].read()
 
 
+@router.get('/list')
+def list_(environ, start_response):
+  start_response('200 OK', [])
+  return [b'Hello', b' ', b'World']
+
+
+@router.get('/tuple')
+def tuple_(environ, start_response):
+  start_response('200 OK', [])
+  return (b'Hello', b' ', b'World')
+
+
+@router.get('/iterator')
+def iter_(environ, start_response):
+  class Iter:
+    def __init__(self):
+      self.val = 0
+
+    def __iter__(self):
+      return self
+
+    def __next__(self):
+      self.val += 1
+      match self.val:
+        case 1:
+          return b'Hello'
+        case 2:
+          return b' '
+        case 3:
+          return b'World'
+        case 4:
+          raise StopIteration
+
+  start_response('200 OK', [])
+  return Iter()
+
+
+@router.get('/generator')
+def gen(environ, start_response):
+  start_response('200 OK', [])
+  yield b'Hello'
+  yield b' '
+  yield b'World'
+
+
+called_close_count = 0
+
+
+@router.get('/call_close')
+def call_close(environ, start_response):
+  start_response('200 OK', [])
+
+  class Iter:
+    def __init__(self):
+      self.val = 0
+
+    def __iter__(self):
+      return self
+
+    def __next__(self):
+      if self.val:
+        raise StopIteration
+      self.val = 1
+      return b'Hello World'
+
+    def close(self):
+      global called_close_count
+      called_close_count += 1
+
+  return Iter()
+
+
+@router.get('/called_close')
+def called_close(environ, start_response):
+  start_response('200 OK', [])
+  return f'{called_close_count}'.encode('ascii')
+
+
 @router.get('/no_start_response')
 def no_start_response(environ, start_response):
   return b'Hello World'

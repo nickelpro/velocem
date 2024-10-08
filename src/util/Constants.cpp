@@ -53,6 +53,7 @@ void init_gPO() {
   gPO.meth = PyUnicode_FromString("REQUEST_METHOD");
   gPO.wsgi_ver = PyTuple_Pack(2, PyLong_FromLong(1), PyLong_FromLong(0));
   gPO.wsgi_input = PyUnicode_FromString("wsgi.input");
+  gPO.close = PyUnicode_FromString("close");
   gPO.velocem_caps = PyUnicode_FromString("velocem.captures");
 #define HTTP_METHOD(c, n) PyUnicode_FromString(#n),
   gPO.methods = {
