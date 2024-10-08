@@ -66,7 +66,8 @@ more performant techniques as well.
   essential to a fast, low latency application.
 
   Velocem has a _very basic_ router, but it should still be faster than most
-  other implementations. This needs a lot of expansion.
+  other implementations. There's a lot of work to do, but it's on the order of
+  1000x faster than Flask.
 
 * **Tests**: There are a couple of tests. The current testing strategy is "when
   she segfaults, write a test so the same segfault doesn't happen again".
