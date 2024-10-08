@@ -38,24 +38,24 @@ HTTPMethod str2meth(std::string_view str) {
 GlobalPythonObjects gPO;
 
 void init_gPO() {
-  gPO.empty = PyUnicode_New(0, 0);
+  gPO.empty = PyUnicode_InternFromString("");
   gPO.empty_bytes = PyBytes_FromStringAndSize(nullptr, 0);
-  gPO.query = PyUnicode_FromString("QUERY_STRING");
-  gPO.path = PyUnicode_FromString("PATH_INFO");
-  gPO.proto = PyUnicode_FromString("SERVER_PROTOCOL");
-  gPO.http = PyUnicode_FromString("http");
-  gPO.http10 = PyUnicode_FromString("HTTP/1.0");
-  gPO.http11 = PyUnicode_FromString("HTTP/1.1");
-  gPO.http_conlen = PyUnicode_FromString("HTTP_CONTENT_LENGTH");
-  gPO.conlen = PyUnicode_FromString("CONTENT_LENGTH");
-  gPO.http_contype = PyUnicode_FromString("HTTP_CONTENT_TYPE");
-  gPO.contype = PyUnicode_FromString("CONTENT_TYPE");
-  gPO.meth = PyUnicode_FromString("REQUEST_METHOD");
+  gPO.query = PyUnicode_InternFromString("QUERY_STRING");
+  gPO.path = PyUnicode_InternFromString("PATH_INFO");
+  gPO.proto = PyUnicode_InternFromString("SERVER_PROTOCOL");
+  gPO.http = PyUnicode_InternFromString("http");
+  gPO.http10 = PyUnicode_InternFromString("HTTP/1.0");
+  gPO.http11 = PyUnicode_InternFromString("HTTP/1.1");
+  gPO.http_conlen = PyUnicode_InternFromString("HTTP_CONTENT_LENGTH");
+  gPO.conlen = PyUnicode_InternFromString("CONTENT_LENGTH");
+  gPO.http_contype = PyUnicode_InternFromString("HTTP_CONTENT_TYPE");
+  gPO.contype = PyUnicode_InternFromString("CONTENT_TYPE");
+  gPO.meth = PyUnicode_InternFromString("REQUEST_METHOD");
   gPO.wsgi_ver = PyTuple_Pack(2, PyLong_FromLong(1), PyLong_FromLong(0));
-  gPO.wsgi_input = PyUnicode_FromString("wsgi.input");
-  gPO.close = PyUnicode_FromString("close");
-  gPO.velocem_caps = PyUnicode_FromString("velocem.captures");
-#define HTTP_METHOD(c, n) PyUnicode_FromString(#n),
+  gPO.wsgi_input = PyUnicode_InternFromString("wsgi.input");
+  gPO.close = PyUnicode_InternFromString("close");
+  gPO.velocem_caps = PyUnicode_InternFromString("velocem.captures");
+#define HTTP_METHOD(c, n) PyUnicode_InternFromString(#n),
   gPO.methods = {
 #include "defs/http_method.def"
   };
