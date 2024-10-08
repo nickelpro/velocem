@@ -617,6 +617,7 @@ PyObject* WSGIApp::start_response(PyObject* const* args, Py_ssize_t nargs,
   Py_INCREF(status_ = status);
   Py_INCREF(headers_ = headers);
 
+  Py_INCREF(wcb_);
   return wcb_;
 }
 

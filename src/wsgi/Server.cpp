@@ -245,7 +245,7 @@ PyObject* run_wsgi_server(PyObject* /* self */, PyObject* const* args,
          &host, &port, &reuseport))
     return nullptr;
 
-  Py_IncRef(appObj);
+  Py_INCREF(appObj);
 
   asio::io_context io {1};
   asio::co_spawn(io, handle_signals(io), detached);
@@ -255,7 +255,7 @@ PyObject* run_wsgi_server(PyObject* /* self */, PyObject* const* args,
   accept(io.get_executor(), host, port, reuseport, app);
   io.run();
 
-  Py_DecRef(appObj);
+  Py_DECREF(appObj);
 
   // There is no way to exit the run loop that isn't via an exception being set
   return nullptr;
