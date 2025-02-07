@@ -4,7 +4,6 @@
 #include <optional>
 #include <vector>
 
-#define PY_SSIZE_T_CLEAN
 #include <Python.h>
 
 #include "Request.hpp"

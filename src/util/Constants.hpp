@@ -7,7 +7,6 @@
 #include <string>
 #include <string_view>
 
-#define PY_SSIZE_T_CLEAN
 #include <Python.h>
 
 namespace velocem {
@@ -67,7 +66,7 @@ enum class HTTPMethod {
 HTTPMethod str2meth(std::string_view str);
 
 constexpr char gRequiredHeadersFormat[] {
-    "Server: Velocem/0.0.12\r\nDate: {:%a, %d %b %Y %T} GMT\r\n"};
+    "Server: Velocem/0.0.13\r\nDate: {:%a, %d %b %Y %T} GMT\r\n"};
 
 extern std::string gRequiredHeaders;
 
@@ -98,7 +97,6 @@ void init_gPO();
 
 struct GlobalVelocemTypes {
   PyTypeObject BalmStringViewType;
-  PyTypeObject RouterType;
   PyTypeObject WSGIInputType;
 };
 

@@ -7,8 +7,10 @@
 #include <string_view>
 #include <utility>
 
-#define PY_SSIZE_T_CLEAN
 #include <Python.h>
+
+#define Py_BUILD_CORE
+#include <internal/pycore_modsupport.h>
 
 #include <asio.hpp>
 

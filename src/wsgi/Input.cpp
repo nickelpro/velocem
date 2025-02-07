@@ -6,8 +6,10 @@
 #include <iterator>
 #include <string_view>
 
-#define PY_SSIZE_T_CLEAN
 #include <Python.h>
+
+#define Py_BUILD_CORE
+#include <internal/pycore_modsupport.h>
 
 #include "util/BalmStringView.hpp"
 #include "util/Constants.hpp"

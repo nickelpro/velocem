@@ -65,9 +65,9 @@ more performant techniques as well.
   Flask app is 5x slower than the raw WSGI equivalent. A fast router is
   essential to a fast, low latency application.
 
-  Velocem has a _very basic_ router, but it should still be faster than most
-  other implementations. There's a lot of work to do, but it's on the order of
-  1000x faster than Flask.
+  Velocem currently recommends/uses [`nanoroute`](https://nanoroute.dev/) as
+  a fast router for WSGI servers. It does not yet provide a faster native
+  router.
 
 * **Tests**: There are a couple of tests. The current testing strategy is "when
   she segfaults, write a test so the same segfault doesn't happen again".

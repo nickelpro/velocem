@@ -1,6 +1,7 @@
 import velocem
+import nanoroute
 
-router = velocem.Router()
+router = nanoroute.router()
 
 
 @router.get('/')

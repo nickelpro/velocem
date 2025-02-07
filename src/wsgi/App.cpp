@@ -9,8 +9,10 @@
 #include <stdexcept>
 #include <vector>
 
-#define PY_SSIZE_T_CLEAN
 #include <Python.h>
+
+#define Py_BUILD_CORE
+#include <internal/pycore_modsupport.h>
 
 #ifdef _MSC_VER
 #include <string.h>

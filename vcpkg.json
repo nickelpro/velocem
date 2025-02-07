@@ -1,6 +1,6 @@
 {
   "name": "velocem",
-  "version": "0.0.12",
+  "version": "0.0.13",
   "description": "Hyperspeed Python Web Framework",
   "homepage": "https://github.com/nickelpro/velocem",
   "maintainers": [
@@ -8,12 +8,6 @@
   ],
   "license": "MIT-0",
   "dependencies": [
-    {
-      "name": "abseil",
-      "features": [
-        "cxx17"
-      ]
-    },
     "asio",
     "llhttp"
   ],
@@ -29,7 +23,7 @@
   "vcpkg-configuration": {
     "default-registry": {
       "kind": "git",
-      "baseline": "fe1cde61e971d53c9687cf9a46308f8f55da19fa",
+      "baseline": "7e21420f775f72ae938bdeb5e6068f722088f06a",
       "repository": "https://github.com/microsoft/vcpkg.git"
     },
     "overlay-triplets": [

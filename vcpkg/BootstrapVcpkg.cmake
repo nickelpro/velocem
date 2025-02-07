@@ -1,4 +1,6 @@
-if(NOT SKIP_VCPKG AND NOT DEFINED CMAKE_TOOLCHAIN_FILE)
+option(VELOCEM_BOOTSTRAP_VCPKG "Bootstrap vcpkg if not other toolchain exists" OFF)
+
+if(VELOCEM_BOOTSTRAP_VCPKG AND NOT DEFINED CMAKE_TOOLCHAIN_FILE)
   include(FetchContent)
 
   if(WIN32)

@@ -1,7 +1,6 @@
 #ifndef VELOCEM_WSGI_SERVER_HPP
 #define VELOCEM_WSGI_SERVER_HPP
 
-#define PY_SSIZE_T_CLEAN
 #include <Python.h>
 
 namespace velocem {

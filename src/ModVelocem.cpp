@@ -1,7 +1,5 @@
-#define PY_SSIZE_T_CLEAN
 #include <Python.h>
 
-#include "Router.hpp"
 #include "util/Constants.hpp"
 #include "wsgi/Server.hpp"
 
@@ -27,7 +25,7 @@ PyMODINIT_FUNC PyInit_velocem(void) {
   auto mod {PyModule_Create(&VelocemModule)};
   if(!mod)
     return nullptr;
-  if(PyModule_AddStringConstant(mod, "__version__", "0.0.12") == -1)
+  if(PyModule_AddStringConstant(mod, "__version__", "0.0.13") == -1)
     return nullptr;
   velocem::init_globals(mod);
   return mod;

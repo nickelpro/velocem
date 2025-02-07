@@ -2,21 +2,19 @@ cmake_minimum_required(VERSION 3.25)
 
 include(vcpkg/BootstrapVcpkg.cmake)
 
-project(velocem LANGUAGES C CXX VERSION 0.0.12)
+project(velocem LANGUAGES C CXX VERSION 0.0.13)
 
 option(VELOCEM_USE_IO_URING "Use io_uring on Linux" ON)
 option(VELOCEM_USE_IPO "Use interprocedural optimization if supported" ON)
 option(VELOCEM_STRIP "Run system strip on compiled module" ON)
 set(VELOCEM_WIN_SDK_VER 0x0A00 CACHE STRING "Windows SDK macro version")
 
-find_package(absl CONFIG REQUIRED)
 find_package(asio CONFIG REQUIRED)
 find_package(llhttp CONFIG REQUIRED)
 find_package(Python3 3.12 REQUIRED COMPONENTS Development.Module)
 
 Python3_add_library(velocem MODULE)
 target_link_libraries(velocem PRIVATE
-  absl::flat_hash_map
   asio::asio
   llhttp::llhttp_static
   Python3::Module
@@ -82,7 +80,13 @@ endif()
 
 add_subdirectory(src)
 
+if(DEFINED PY_BUILD_CMAKE_VERSION)
+  set(VELOCEM_PLATLIB ${PY_BUILD_CMAKE_PROJECT_NAME}-${PY_BUILD_CMAKE_PROJECT_VERSION}.data/platlib)
+else()
+  set(VELOCEM_PLATLIB platlib)
+endif()
+
 install(
   TARGETS velocem
-  LIBRARY DESTINATION ${PY_BUILD_CMAKE_PACKAGE_NAME}-${PY_BUILD_CMAKE_PACKAGE_VERSION}.data/platlib
+  LIBRARY DESTINATION ${VELOCEM_PLATLIB}
 )

@@ -5,7 +5,6 @@
 #include <string>
 #include <vector>
 
-#define PY_SSIZE_T_CLEAN
 #include <Python.h>
 
 #include "Constants.hpp"

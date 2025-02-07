@@ -5,31 +5,39 @@ on:
   push:
   pull_request:
 
-
 jobs:
   build_windows:
     name: Build and Test on Windows
     runs-on: windows-latest
 
     steps:
+      - name: Export GitHub Actions cache environment variables
+        uses: actions/github-script@v7
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: "3.13"
 
       - name: Build
+        env:
+          VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
         run: |
           python -m venv .venv
           .venv\Scripts\Activate.ps1
-          pip install .
+          python -m pip install --upgrade pip
+          pip install '.[test]' -C override=cmake.args+=["--toolchain=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"]
 
       - name: Test
         run: |
           .venv\Scripts\Activate.ps1
-          pip install pytest
           pytest test
 
   build_macos:
@@ -37,6 +45,13 @@ jobs:
     runs-on: macos-latest
 
     steps:
+      - name: Export GitHub Actions cache environment variables
+        uses: actions/github-script@v7
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -45,35 +60,55 @@ jobs:
         with:
           xcode-version: latest
 
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
       - name: Build
+        env:
+          VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
         run: |
           python -m venv .venv
           . .venv/bin/activate
           pip install --upgrade pip
-          pip install .
+          pip install '.[test]' -C override=cmake.options.VELOCEM_BOOTSTRAP_VCPKG="ON"
 
       - name: Test
         run: |
           . .venv/bin/activate
-          pip install pytest
           pytest test
 
   build_linux:
     name: Build and Test on Linux
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
+
     steps:
+      - name: Export GitHub Actions cache environment variables
+        uses: actions/github-script@v7
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
       - name: Build
+        env:
+          VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
         run: |
           python -m venv .venv
           . .venv/bin/activate
           pip install --upgrade pip
-          pip install .
+          pip install '.[test]' -C override=cmake.args+=\["--toolchain=${VCPKG_INSTALLATION_ROOT}/scripts/buildsystems/vcpkg.cmake"\]
 
       - name: Test
         run: |
           . .venv/bin/activate
-          pip install pytest
           pytest test

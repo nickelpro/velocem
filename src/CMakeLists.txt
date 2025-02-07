@@ -6,18 +6,17 @@ target_sources(velocem PRIVATE
   BASE_DIRS ${CMAKE_CURRENT_LIST_DIR}
 
   FILES
-  HTTPParser.hpp
-  Router.hpp
+    HTTPParser.hpp
 
-  plat/plat.hpp
+    plat/plat.hpp
 
-  util/Constants.hpp
-  util/Util.hpp
+    util/Constants.hpp
+    util/Util.hpp
 
-  wsgi/App.hpp
-  wsgi/Input.hpp
-  wsgi/Request.hpp
-  wsgi/Server.hpp
+    wsgi/App.hpp
+    wsgi/Input.hpp
+    wsgi/Request.hpp
+    wsgi/Server.hpp
 )
 
 add_subdirectory(plat)
