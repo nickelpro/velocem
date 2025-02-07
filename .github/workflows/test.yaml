@@ -33,7 +33,9 @@ jobs:
           python -m venv .venv
           .venv\Scripts\Activate.ps1
           python -m pip install --upgrade pip
-          pip install '.[test]' -C override=cmake.args+=["--toolchain=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"]
+          pip install '.[test]' -v `
+            -C verbose=1 `
+            -C override=cmake.args+=["--toolchain=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"]
 
       - name: Test
         run: |
@@ -68,11 +70,16 @@ jobs:
       - name: Build
         env:
           VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+          MACOSX_DEPLOYMENT_TARGET: 13.3
+          ARCHFLAGS: "-arch arm64"
         run: |
           python -m venv .venv
           . .venv/bin/activate
           pip install --upgrade pip
-          pip install '.[test]' -C override=cmake.options.VELOCEM_BOOTSTRAP_VCPKG="ON"
+          pip install '.[test]' -v \
+            -C verbose=1=1 \
+            -C override=cmake.options.VELOCEM_BOOTSTRAP_VCPKG="ON" \
+            -C override=cmake.options.VCPKG_OSX_DEPLOYMENT_TARGET=\"13.3\"
 
       - name: Test
         run: |
@@ -106,7 +113,9 @@ jobs:
           python -m venv .venv
           . .venv/bin/activate
           pip install --upgrade pip
-          pip install '.[test]' -C override=cmake.args+=\["--toolchain=${VCPKG_INSTALLATION_ROOT}/scripts/buildsystems/vcpkg.cmake"\]
+          pip install '.[test]' -v \
+            -C verbose=1 \
+            -C override=cmake.args+=\["--toolchain=${VCPKG_INSTALLATION_ROOT}/scripts/buildsystems/vcpkg.cmake"\]
 
       - name: Test
         run: |
