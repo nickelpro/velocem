@@ -1,10 +1,11 @@
 #ifndef VELOCEM_UTIL_HPP
 #define VELOCEM_UTIL_HPP
 
+#include <cstddef>
 #include <string>
 #include <vector>
 
-#include <asio.hpp>
+#include <asio/buffer.hpp>
 
 #include <Python.h>
 

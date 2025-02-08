@@ -2,8 +2,10 @@
 
 #include <chrono>
 #include <csignal>
+#include <cstring>
 #include <format>
 #include <queue>
+#include <stdexcept>
 #include <string_view>
 #include <utility>
 

@@ -7,11 +7,18 @@ project(velocem LANGUAGES C CXX VERSION 0.0.13)
 option(VELOCEM_USE_IO_URING "Use io_uring on Linux" ON)
 option(VELOCEM_USE_IPO "Use interprocedural optimization if supported" ON)
 option(VELOCEM_STRIP "Run system strip on compiled module" ON)
+option(VELOCEM_GEN_IWYU_MAPPINGS "Generate Python mappings for IWYU" OFF)
 set(VELOCEM_WIN_SDK_VER 0x0A00 CACHE STRING "Windows SDK macro version")
 
 find_package(asio CONFIG REQUIRED)
 find_package(llhttp CONFIG REQUIRED)
-find_package(Python3 3.12 REQUIRED COMPONENTS Development.Module)
+
+if(VELOCEM_GEN_IWYU_MAPPINGS)
+  find_package(Python3 3.13 REQUIRED COMPONENTS Interpreter Development.Module)
+  include(iwyu/GetIWYUMapGen.cmake)
+else()
+  find_package(Python3 3.13 REQUIRED COMPONENTS Development.Module)
+endif()
 
 Python3_add_library(velocem MODULE)
 target_link_libraries(velocem PRIVATE

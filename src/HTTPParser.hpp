@@ -2,16 +2,16 @@
 #define VELOCEM_HTTP_PARSER_HPP
 
 #include <cstddef>
-#include <cstring>
 #include <span>
-#include <stdexcept>
-#include <string_view>
-#include <utility>
 
-#include <asio.hpp>
 #include <llhttp.h>
 
-#include "wsgi/Request.hpp"
+namespace asio {
+class mutable_buffer;
+}
+namespace velocem {
+struct WSGIRequest;
+}
 
 namespace velocem {
 

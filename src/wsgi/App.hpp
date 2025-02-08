@@ -6,7 +6,9 @@
 
 #include <Python.h>
 
-#include "Request.hpp"
+namespace velocem {
+struct WSGIRequest;
+}
 
 namespace velocem {
 

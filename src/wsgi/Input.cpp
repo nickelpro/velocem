@@ -1,17 +1,15 @@
 #include "Input.hpp"
 
+#include <array>
 #include <cstddef>
 #include <cstring>
 #include <functional>
-#include <iterator>
-#include <string_view>
 
 #include <Python.h>
 
 #define Py_BUILD_CORE
 #include <internal/pycore_modsupport.h>
 
-#include "util/BalmStringView.hpp"
 #include "util/Constants.hpp"
 
 namespace velocem {
