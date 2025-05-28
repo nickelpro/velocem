@@ -24,7 +24,10 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
+          python-version-file: pyproject.toml
+
+      - name: Setup Developer Prompt
+        uses: ilammy/msvc-dev-cmd@v1
 
       - name: Build
         env:
@@ -33,13 +36,13 @@ jobs:
           python -m venv .venv
           .venv\Scripts\Activate.ps1
           python -m pip install --upgrade pip
-          pip install '.[test]' -v `
-            -C verbose=1 `
+          pip install . -v `
             -C override=cmake.args+=["--toolchain=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"]
 
       - name: Test
         run: |
           .venv\Scripts\Activate.ps1
+          pip install --group test
           pytest test
 
   build_macos:
@@ -65,7 +68,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
+          python-version-file: pyproject.toml
 
       - name: Build
         env:
@@ -76,14 +79,14 @@ jobs:
           python -m venv .venv
           . .venv/bin/activate
           pip install --upgrade pip
-          pip install '.[test]' -v \
-            -C verbose=1=1 \
+          pip install . -v \
             -C override=cmake.options.VELOCEM_BOOTSTRAP_VCPKG="ON" \
             -C override=cmake.options.VCPKG_OSX_DEPLOYMENT_TARGET=\"13.3\"
 
       - name: Test
         run: |
           . .venv/bin/activate
+          pip install --group test
           pytest test
 
   build_linux:
@@ -104,7 +107,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
+          python-version-file: pyproject.toml
 
       - name: Build
         env:
@@ -113,11 +116,11 @@ jobs:
           python -m venv .venv
           . .venv/bin/activate
           pip install --upgrade pip
-          pip install '.[test]' -v \
-            -C verbose=1 \
+          pip install . -v \
             -C override=cmake.args+=\["--toolchain=${VCPKG_INSTALLATION_ROOT}/scripts/buildsystems/vcpkg.cmake"\]
 
       - name: Test
         run: |
           . .venv/bin/activate
+          pip install --group test
           pytest test

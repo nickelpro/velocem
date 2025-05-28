@@ -19,7 +19,7 @@ classifiers = [
 urls = { "Documentation" = "https://github.com/nickelpro/velocem" }
 dependencies = []
 
-[project.optional-dependencies]
+[dependency-groups]
 test = ["pytest", "nanoroute"]
 
 [build-system]
@@ -35,8 +35,7 @@ include = ["CMakeLists.txt", "vcpkg.json", "src", "vcpkg"]
 [tool.py-build-cmake.cmake]
 minimum_version = "3.25"
 config = "Release"
-build_type = "Release"
-build_args = ["-j"]
+generator = "Ninja"
 
 [tool.py-build-cmake.linux.cmake.options]
 "VCPKG_TARGET_TRIPLET:STRING" = "x64-linux-release-lto"
